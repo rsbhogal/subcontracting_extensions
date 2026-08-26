@@ -1,9 +1,293 @@
 app_name = "subcontracting_extensions"
 app_title = "Subcontracting Extensions"
-app_publisher = "R S Bhogal"
-app_description = "App to enhance Subcontracting activity to multi-item multi-lot transactions based over core doctypes"
-app_email = "rsbhogal@gmail.com"
+app_publisher = "R.S. Bhogal"
+app_description = "Bhogals subcontracting workflow extensions for ERPNext"
+app_email = "rsbhogal@bhogal.com"
 app_license = "mit"
+
+required_apps = ["erpnext"]
+
+after_install = (
+	"subcontracting_extensions.setup.processor_material_accounts."
+	"ensure_processor_material_accounts"
+)
+
+after_migrate = (
+	"subcontracting_extensions.setup.processor_material_accounts."
+	"ensure_processor_material_accounts"
+)
+
+fixtures = [
+	{
+		"dt": "Workspace",
+		"filters": [["name", "=", "Subcontracting"]],
+	},
+	{
+		"dt": "Custom Field",
+		"filters": [
+			[
+				"name",
+				"in",
+				[
+					"Purchase Invoice-custom_processor_lot_settlement",
+					"Subcontracting Receipt-custom_processor_lot_references",
+					"Subcontracting Receipt-custom_processor_lot",
+					"Subcontracting Receipt-custom_column_break_2r0a0",
+					"Subcontracting Receipt-custom_processor_lot_receipt",
+					"Purchase Order-custom_processor_settlement_policy",
+					"Purchase Order-custom_recover_raw_material_shortage",
+					"Purchase Order-custom_recover_processing_charges_on_shortage",
+					"Purchase Order-custom_column_break_quhan",
+					"Purchase Order-custom_settlement_basis",
+					"Purchase Order-custom_settlement_remarks",
+					"Purchase Order Item-custom_processing_route",
+				],
+			]
+		],
+	},
+]
+
+doctype_js = {
+	"Purchase Order": "public/js/purchase_order.js",
+	"Purchase Receipt": "public/js/purchase_receipt.js",
+	"Purchase Invoice": "public/js/purchase_invoice.js",
+	"Subcontracting Receipt": "public/js/subcontracting_receipt.js",
+}
+
+app_include_js = [
+	"/assets/subcontracting_extensions/js/subcontracting_workspace_link.js",
+]
+
+doc_events = {
+	"Subcontracting Order": {
+		"before_validate": (
+			"subcontracting_extensions.scripts.subcontracting_order."
+			"apply_processing_routes"
+		),
+		"validate": (
+			"subcontracting_extensions.scripts.subcontracting_order."
+			"apply_processing_route_warehouses"
+		),
+		"on_submit": (
+			"subcontracting_extensions.scripts.subcontracting_order."
+			"ensure_processor_lot"
+		),
+	},
+	"Purchase Order": {
+		"before_insert": (
+			"subcontracting_extensions.scripts.purchase_order_naming."
+			"set_po_date_series_field"
+		),
+		"validate": "subcontracting_extensions.scripts.purchase_order.validate",
+	},
+	"Purchase Invoice": {
+		"autoname": (
+			"subcontracting_extensions.scripts.purchase_document_naming."
+			"set_posting_date_name"
+		),
+		"validate": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot_receipt.processor_lot_receipt."
+			"validate_purchase_invoice_supplier_identity"
+		),
+		"after_insert": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot_receipt.processor_lot_receipt."
+			"link_purchase_invoice"
+		),
+		"on_update": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot_receipt.processor_lot_receipt."
+			"link_purchase_invoice"
+		),
+		"on_submit": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot_receipt.processor_lot_receipt."
+			"link_purchase_invoice"
+		),
+		"on_cancel": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot_receipt.processor_lot_receipt."
+			"unlink_purchase_invoice"
+		),
+		"on_trash": [
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot_receipt.processor_lot_receipt."
+				"unlink_purchase_invoice"
+			),
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot.processor_lot."
+				"unlink_processor_lot_settlement_debit_note"
+			),
+		],
+	},
+	"Purchase Receipt": {
+		"autoname": (
+			"subcontracting_extensions.scripts.purchase_document_naming."
+			"set_posting_date_name"
+		),
+		"after_insert": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot_receipt.processor_lot_receipt."
+			"link_purchase_receipt"
+		),
+		"on_update": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot_receipt.processor_lot_receipt."
+			"link_purchase_receipt"
+		),
+		"on_submit": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot_receipt.processor_lot_receipt."
+			"link_purchase_receipt"
+		),
+		"on_cancel": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot_receipt.processor_lot_receipt."
+			"unlink_purchase_receipt"
+		),
+		"on_trash": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot_receipt.processor_lot_receipt."
+			"unlink_purchase_receipt"
+		),
+	},
+	"Stock Entry": {
+		"validate": [
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot_receipt.processor_lot_receipt."
+				"validate_material_credit_stock_entry"
+			),
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot.settlement_application_engine."
+				"validate_credit_application_stock_entry"
+			),
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot.settlement_application_engine."
+				"prepare_credit_application_stock_entry_submit"
+			),
+		],
+		"before_submit": [
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot_receipt.processor_lot_receipt."
+				"validate_material_credit_stock_entry"
+			),
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot.settlement_application_engine."
+				"validate_credit_application_stock_entry"
+			),
+		],
+		"before_cancel": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot.settlement_application_engine."
+			"prevent_credit_application_document_cancel"
+		),
+		"on_submit": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot.settlement_application_engine."
+			"restore_credit_application_stock_entry_sco_status"
+		),
+		"on_cancel": [
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot_receipt.processor_lot_receipt."
+				"unlink_material_credit_stock_entry"
+			),
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot.settlement_application_engine."
+				"unlink_credit_application_document"
+			),
+		],
+		"on_trash": [
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot_receipt.processor_lot_receipt."
+				"unlink_material_credit_stock_entry"
+			),
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot.settlement_application_engine."
+				"unlink_credit_application_document"
+			),
+		],
+	},
+	"Journal Entry": {
+		"validate": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot.settlement_application_engine."
+			"validate_credit_application_journal_entry"
+		),
+		"before_submit": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot.settlement_application_engine."
+			"validate_credit_application_journal_entry"
+		),
+		"before_cancel": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot.settlement_application_engine."
+			"prevent_credit_application_document_cancel"
+		),
+		"on_cancel": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot.settlement_application_engine."
+			"unlink_credit_application_document"
+		),
+		"on_trash": (
+			"subcontracting_extensions.subcontracting_extensions.doctype."
+			"processor_lot.settlement_application_engine."
+			"unlink_credit_application_document"
+		),
+	},
+	"Subcontracting Receipt": {
+		"before_insert": (
+			"subcontracting_extensions.scripts.subcontracting_receipt."
+			"before_insert"
+		),
+		"validate": (
+			"subcontracting_extensions.scripts.subcontracting_receipt.validate"
+		),
+		"after_insert": (
+			"subcontracting_extensions.scripts.subcontracting_receipt."
+			"after_insert"
+		),
+		"on_trash": (
+			"subcontracting_extensions.scripts.subcontracting_receipt.on_trash"
+		),
+	},
+}
+
+override_whitelisted_methods = {
+	(
+		"erpnext.controllers.subcontracting_controller."
+		"make_rm_stock_entry"
+	): (
+		"subcontracting_extensions.overrides.subcontracting_order."
+		"make_rm_stock_entry"
+	),
+	(
+		"erpnext.subcontracting.doctype.subcontracting_receipt."
+		"subcontracting_receipt.make_purchase_receipt"
+	): (
+		"subcontracting_extensions.overrides.subcontracting_receipt."
+		"make_purchase_receipt"
+	),
+	(
+		"erpnext.stock.doctype.purchase_receipt."
+		"purchase_receipt.make_purchase_invoice"
+	): (
+		"subcontracting_extensions.overrides.purchase_receipt."
+		"make_purchase_invoice"
+	),
+}
+
 
 # Apps
 # ------------------
