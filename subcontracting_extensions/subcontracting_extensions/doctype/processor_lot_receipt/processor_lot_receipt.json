@@ -1,0 +1,511 @@
+{
+ "actions": [],
+ "autoname": "PLR-.YY.-.MM.-.####",
+ "creation": "2026-07-19 12:00:30.552372",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "document_reference_section",
+  "subcontracting_receipt",
+  "purchase_receipt",
+  "purchase_invoice",
+  "column_break_document_reference",
+  "subcontracting_receipt_date",
+  "supplier_challan_number",
+  "supplier_challan_date",
+  "supplier_invoice_number",
+  "supplier_invoice_date",
+  "physical_receipt_date",
+  "column_break_jrzy",
+  "vehicle_no",
+  "receipt_measurement_method",
+  "measurement_method",
+  "column_break_ijec",
+  "column_break_jqrt",
+  "weighment_section",
+  "column_break_weighment",
+  "supplier_weighbridge",
+  "supplier_weighbridge_slip_number",
+  "supplier_weighment_date",
+  "supplier_gross_weight",
+  "supplier_tare_weight",
+  "supplier_net_weight",
+  "supplier_weighment_uom",
+  "column_break_eogp",
+  "company_weighbridge",
+  "company_weighbridge_slip_number",
+  "company_weighment_date",
+  "company_gross_weight",
+  "company_tare_weight",
+  "company_net_weight",
+  "company_weighment_uom",
+  "quantity_reconciliation_section",
+  "supplier_invoice_qty",
+  "supplier_invoice_uom",
+  "supplier_invoice_vs_company_qty",
+  "supplier_invoice_vs_company_percent",
+  "column_break_isfu",
+  "company_accepted_qty",
+  "company_accepted_uom",
+  "column_break_quantity_reconciliation",
+  "stock_uom",
+  "remarks",
+  "processor_lot_allocations_section",
+  "lot_allocations",
+  "processor_material_credit_section",
+  "lot_backed_qty",
+  "processor_material_credit_qty",
+  "material_credit_invoice_qty",
+  "material_credit_status",
+  "material_credit_stock_entry",
+  "column_break_material_credit",
+  "allow_processor_material_credit",
+  "material_credit_reason",
+  "lot_information",
+  "processor_lot",
+  "subcontracting_order",
+  "supplier",
+  "column_break_mfup",
+  "company",
+  "supplier_warehouse",
+  "processed_item"
+ ],
+ "fields": [
+  {
+   "fieldname": "document_reference_section",
+   "fieldtype": "Section Break",
+   "label": "Receipt and Invoice References"
+  },
+  {
+   "columns": 3,
+   "fieldname": "subcontracting_receipt",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Subcontracting Receipt",
+   "options": "Subcontracting Receipt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "purchase_receipt",
+   "fieldtype": "Link",
+   "label": "Purchase Receipt",
+   "options": "Purchase Receipt",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "purchase_invoice",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Purchase Invoice",
+   "options": "Purchase Invoice",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_document_reference",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "supplier_invoice_date",
+   "fieldtype": "Date",
+   "label": "Supplier Invoice Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "weighment_section",
+   "fieldtype": "Section Break",
+   "label": "Physical Receipt Measurement"
+  },
+  {
+   "columns": 2,
+   "fieldname": "vehicle_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Vehicle No."
+  },
+  {
+   "fieldname": "quantity_reconciliation_section",
+   "fieldtype": "Section Break",
+   "label": "Commercial Reconciliation"
+  },
+  {
+   "fieldname": "column_break_quantity_reconciliation",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "stock_uom",
+   "fieldtype": "Link",
+   "label": "Stock UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "lot_allocations",
+   "fieldtype": "Table",
+   "label": "Lot Allocations",
+   "options": "Processor Lot Receipt Allocation"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "processor_material_credit_section",
+   "fieldtype": "Section Break",
+   "label": "Processor Material Credit"
+  },
+  {
+   "fieldname": "lot_backed_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Lot Backed Qty",
+   "non_negative": 1,
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "processor_material_credit_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Processor Material Credit Qty",
+   "non_negative": 1,
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "material_credit_invoice_qty",
+   "fieldtype": "Float",
+   "label": "Material Credit Invoice Qty",
+   "non_negative": 1,
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "material_credit_status",
+   "fieldtype": "Select",
+   "label": "Material Credit Status",
+   "options": "\nNot Applicable\nProposed\nRecorded\nPartly Applied\nFully Applied\nCommercially Settled\nReversed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "material_credit_stock_entry",
+   "fieldtype": "Link",
+   "label": "Material Credit Stock Entry",
+   "no_copy": 1,
+   "options": "Stock Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_material_credit",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Permit the accepted quantity exceeding compatible Processor Lot balances to be recorded as a controlled Processor Material Credit.",
+   "fieldname": "allow_processor_material_credit",
+   "fieldtype": "Check",
+   "label": "Allow Processor Material Credit"
+  },
+  {
+   "depends_on": "allow_processor_material_credit",
+   "fieldname": "material_credit_reason",
+   "fieldtype": "Small Text",
+   "label": "Material Credit Reason",
+   "mandatory_depends_on": "allow_processor_material_credit"
+  },
+  {
+   "fieldname": "subcontracting_receipt_date",
+   "fieldtype": "Date",
+   "label": "Subcontracting Receipt Date",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "supplier_invoice_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Supplier Invoice Number",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_gross_weight",
+   "fieldtype": "Float",
+   "label": "Company Gross Qty",
+   "precision": "3"
+  },
+  {
+   "fieldname": "company_tare_weight",
+   "fieldtype": "Float",
+   "label": "Company Tare Qty",
+   "precision": "3"
+  },
+  {
+   "columns": 1,
+   "fieldname": "company_net_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Company Net Qty",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company_weighbridge_slip_number",
+   "fieldtype": "Data",
+   "label": "Company Weighbridge Slip Number"
+  },
+  {
+   "default": "Kg",
+   "fieldname": "company_weighment_uom",
+   "fieldtype": "Link",
+   "label": "Company Measurement UOM",
+   "options": "UOM",
+   "reqd": 1
+  },
+  {
+   "fieldname": "supplier_challan_number",
+   "fieldtype": "Data",
+   "label": "Supplier Challan Number"
+  },
+  {
+   "fieldname": "supplier_challan_date",
+   "fieldtype": "Date",
+   "label": "Supplier Challan Date"
+  },
+  {
+   "default": "Today",
+   "fieldname": "physical_receipt_date",
+   "fieldtype": "Date",
+   "label": "Physical Receipt Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "supplier_weighbridge_slip_number",
+   "fieldtype": "Data",
+   "label": "Supplier Weighbridge Slip Number"
+  },
+  {
+   "fieldname": "supplier_gross_weight",
+   "fieldtype": "Float",
+   "label": "Supplier Gross Qty",
+   "precision": "3"
+  },
+  {
+   "fieldname": "supplier_tare_weight",
+   "fieldtype": "Float",
+   "label": "Supplier Tare Qty",
+   "precision": "3"
+  },
+  {
+   "default": "Kg",
+   "fieldname": "supplier_weighment_uom",
+   "fieldtype": "Link",
+   "label": "Supplier MeasurementUOM",
+   "options": "UOM",
+   "reqd": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "supplier_net_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Supplier Net Weight",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "supplier_weighment_date",
+   "fieldtype": "Date",
+   "label": "Supplier Weighment Date"
+  },
+  {
+   "fieldname": "company_weighment_date",
+   "fieldtype": "Date",
+   "label": "Company Weighment Date"
+  },
+  {
+   "description": "Name of Weighbridge",
+   "fieldname": "supplier_weighbridge",
+   "fieldtype": "Data",
+   "label": "Supplier Weighbridge"
+  },
+  {
+   "description": "Name of Weighbridge",
+   "fieldname": "company_weighbridge",
+   "fieldtype": "Data",
+   "label": "Company Weighbridge"
+  },
+  {
+   "columns": 1,
+   "fieldname": "supplier_invoice_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Supplier Invoice Qty",
+   "precision": "3"
+  },
+  {
+   "columns": 1,
+   "description": "Difference between Supplier Invoice Qty and Company Accepted Qty",
+   "fieldname": "supplier_invoice_vs_company_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Supplier Invoice Vs Company Qty",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "supplier_invoice_vs_company_percent",
+   "fieldtype": "Percent",
+   "label": "Supplier Invoice Vs Company %",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_weighment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_eogp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "processor_lot",
+   "fieldtype": "Link",
+   "label": "Processor Lot",
+   "options": "Processor Lot",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "processor_lot.subcontracting_order",
+   "fieldname": "subcontracting_order",
+   "fieldtype": "Link",
+   "label": "Subcontracting Order",
+   "options": "Subcontracting Order",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "processor_lot.supplier",
+   "fieldname": "supplier",
+   "fieldtype": "Link",
+   "label": "Supplier",
+   "options": "Supplier",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_mfup",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "processor_lot.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "processor_lot.supplier_warehouse",
+   "fieldname": "supplier_warehouse",
+   "fieldtype": "Link",
+   "label": "Supplier Warehouse",
+   "options": "Warehouse",
+   "read_only": 1
+  },
+  {
+   "fieldname": "processed_item",
+   "fieldtype": "Link",
+   "label": "Processed Item",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "lot_information",
+   "fieldtype": "Section Break",
+   "label": "Lot Information"
+  },
+  {
+   "fieldname": "supplier_invoice_uom",
+   "fieldtype": "Link",
+   "label": "Supplier Invoice UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_isfu",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company_accepted_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Company Accepted Qty",
+   "precision": "3"
+  },
+  {
+   "fieldname": "company_accepted_uom",
+   "fieldtype": "Link",
+   "label": "Company Accepted UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "measurement_method",
+   "fieldtype": "Select",
+   "label": "Measurement Method",
+   "options": "\nWeight\nCount",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_ijec",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_jqrt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "receipt_measurement_method",
+   "fieldtype": "Section Break",
+   "label": "Receipt Measurement Method"
+  },
+  {
+   "fieldname": "column_break_jrzy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "processor_lot_allocations_section",
+   "fieldtype": "Section Break",
+   "label": "Processor Lot Allocations"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-10 06:41:29.184917",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Extensions",
+ "name": "Processor Lot Receipt",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

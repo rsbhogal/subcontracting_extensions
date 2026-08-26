@@ -1,0 +1,157 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-10 05:55:08.934095",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_2ar9",
+  "processor_lot",
+  "subcontracting_order",
+  "purchase_order",
+  "lot_date",
+  "processed_item",
+  "stock_uom",
+  "lot_order_qty",
+  "previously_received_qty",
+  "available_qty",
+  "allocated_accepted_qty",
+  "allocated_invoice_qty",
+  "invoice_vs_accepted_qty",
+  "allocation_status",
+  "subcontracting_receipt_item"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_2ar9",
+   "fieldtype": "Section Break",
+   "label": "Allocation Details"
+  },
+  {
+   "fieldname": "processor_lot",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Processor Lot",
+   "options": "Processor Lot",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "subcontracting_order",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Subcontracting Order",
+   "options": "Subcontracting Order",
+   "read_only": 1
+  },
+  {
+   "fieldname": "purchase_order",
+   "fieldtype": "Link",
+   "label": "Purchase Order",
+   "options": "Purchase Order",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lot_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Lot Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "processed_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Processed Item",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "stock_uom",
+   "fieldtype": "Link",
+   "label": "Stock UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lot_order_qty",
+   "fieldtype": "Float",
+   "label": "Lot Order Qty",
+   "non_negative": 1,
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "previously_received_qty",
+   "fieldtype": "Float",
+   "label": "Previously Received Qty",
+   "non_negative": 1,
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "available_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Available Qty",
+   "non_negative": 1,
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "allocated_accepted_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Allocated Accepted Qty",
+   "non_negative": 1,
+   "precision": "6",
+   "reqd": 1
+  },
+  {
+   "fieldname": "allocated_invoice_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Allocated Invoice Qty",
+   "non_negative": 1,
+   "precision": "6"
+  },
+  {
+   "fieldname": "invoice_vs_accepted_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Invoice vs Accepted Qty",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "allocation_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Allocation Status",
+   "options": "Fully Allocated\nPartly Allocated",
+   "read_only": 1
+  },
+  {
+   "fieldname": "subcontracting_receipt_item",
+   "fieldtype": "Data",
+   "label": "Subcontracting Receipt Item",
+   "no_copy": 1,
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-10 05:55:08.934095",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Extensions",
+ "name": "Processor Lot Receipt Allocation",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

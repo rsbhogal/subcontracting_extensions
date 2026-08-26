@@ -1,0 +1,119 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:route_name",
+ "creation": "2026-08-02 16:50:04.285899",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "route_name",
+  "is_active",
+  "route_definition_section",
+  "finished_item",
+  "service_item",
+  "route_description",
+  "route_definition_column",
+  "manufacturing_bom",
+  "manufacturing_bom_summary",
+  "route_components_section",
+  "route_components"
+ ],
+ "fields": [
+  {
+   "fieldname": "route_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Route Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Is Active"
+  },
+  {
+   "fieldname": "route_definition_section",
+   "fieldtype": "Section Break",
+   "label": "Route Definition"
+  },
+  {
+   "fieldname": "finished_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Finished Item",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "service_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Service Item",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "route_definition_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "manufacturing_bom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Manufacturing BOM",
+   "options": "BOM",
+   "reqd": 1
+  },
+  {
+   "fieldname": "route_description",
+   "fieldtype": "Small Text",
+   "label": "Route Description"
+  },
+  {
+   "fieldname": "route_components_section",
+   "fieldtype": "Section Break",
+   "label": "Route Components"
+  },
+  {
+   "fieldname": "route_components",
+   "fieldtype": "Table",
+   "label": "Route Components",
+   "options": "Subcontracting Route Component"
+  },
+  {
+   "fieldname": "manufacturing_bom_summary",
+   "fieldtype": "HTML"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-07 10:29:46.253531",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Extensions",
+ "name": "Subcontracting Route",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "search_fields": "finished_item,service_item,manufacturing_bom",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "route_name"
+}

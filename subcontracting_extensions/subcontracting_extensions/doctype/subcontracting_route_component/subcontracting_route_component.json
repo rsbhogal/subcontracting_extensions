@@ -1,0 +1,68 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-03 06:46:04.791380",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "component_item",
+  "required_qty_per_bom_qty",
+  "stock_uom",
+  "source_warehouse",
+  "bom_detail"
+ ],
+ "fields": [
+  {
+   "fieldname": "component_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Component Item",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "required_qty_per_bom_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Required Qty per BOM Qty",
+   "reqd": 1
+  },
+  {
+   "fieldname": "stock_uom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Stock UOM",
+   "options": "UOM",
+   "reqd": 1
+  },
+  {
+   "fieldname": "source_warehouse",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Source Warehouse",
+   "options": "Warehouse",
+   "reqd": 1
+  },
+  {
+   "fieldname": "bom_detail",
+   "fieldtype": "Data",
+   "label": "BOM Detail",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-04 15:41:27.667393",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Extensions",
+ "name": "Subcontracting Route Component",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

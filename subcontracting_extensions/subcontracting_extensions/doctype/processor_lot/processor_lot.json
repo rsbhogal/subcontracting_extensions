@@ -1,0 +1,459 @@
+{
+ "actions": [],
+ "autoname": "PLS-.YY.-.MM.-.####",
+ "creation": "2026-07-13 16:58:22.141688",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "lot_information_section",
+  "company",
+  "cost_center",
+  "branch",
+  "column_break_ddub",
+  "purchase_order",
+  "subcontracting_order",
+  "supplier",
+  "supplier_warehouse",
+  "processor_settlement_policy_section",
+  "recover_raw_material_shortage",
+  "recover_processing_charges_on_shortage",
+  "settlement_basis",
+  "settlement_policy_source",
+  "column_break_redo",
+  "settlement_remarks",
+  "settlement_policy_override_section",
+  "override_settlement_policy",
+  "settlement_policy_override_reason",
+  "column_break_muva",
+  "overridden_by",
+  "settlement_policy_overridden_on",
+  "settlement_details_section",
+  "settlement_action",
+  "column_break_header",
+  "settlement_date",
+  "settlement_status",
+  "last_receipt_date",
+  "receipt_summary_section",
+  "receipt_count",
+  "receipt_stock_uom",
+  "total_company_accepted_qty",
+  "receipt_summary_column_break",
+  "total_supplier_net_weight",
+  "total_company_net_weight",
+  "total_supplier_invoice_qty",
+  "receipt_journey_section",
+  "receipt_journey_html",
+  "physical_receipt_position_section",
+  "physical_receipt_position_html",
+  "health_panel_section",
+  "health_panel_html",
+  "items_section",
+  "items",
+  "commercial_details_section",
+  "reason",
+  "remarks",
+  "generated_document_section",
+  "settlement_documents_html",
+  "generated_document_type",
+  "generated_document",
+  "debit_note",
+  "section_break_imfd",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "settlement_details_section",
+   "fieldtype": "Section Break",
+   "label": "Settlement Details"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "subcontracting_order",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Subcontracting Order",
+   "options": "Subcontracting Order",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "purchase_order",
+   "fieldtype": "Link",
+   "label": "Purchase Order",
+   "options": "Purchase Order",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_header",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "supplier",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Supplier",
+   "options": "Supplier",
+   "read_only": 1
+  },
+  {
+   "fieldname": "supplier_warehouse",
+   "fieldtype": "Link",
+   "label": "Supplier Warehouse",
+   "options": "Warehouse",
+   "read_only": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "settlement_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Settlement Date",
+   "reqd": 1
+  },
+  {
+   "default": "Recover Raw Material and Processing Charges",
+   "fieldname": "settlement_action",
+   "fieldtype": "Select",
+   "label": "Settlement Action",
+   "options": "Recover Raw Material and Processing Charges\nRecover Raw Material Shortage\nRecover Processing Charges Only\nNo Recovery",
+   "reqd": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "settlement_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Settlement Status",
+   "options": "Draft\nDebit Note Created\nReversal In Progress\nReopened\nReopened - Debit Note Created\nCompleted\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "items_section",
+   "fieldtype": "Section Break",
+   "label": "Material Settlement"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Processor Lot Settlement Item"
+  },
+  {
+   "fieldname": "commercial_details_section",
+   "fieldtype": "Section Break",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "hidden": 1,
+   "label": "Reason for Settlement"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "generated_document_section",
+   "fieldtype": "Section Break",
+   "label": "Settlement Documents"
+  },
+  {
+   "fieldname": "settlement_documents_html",
+   "fieldtype": "HTML",
+   "label": "Settlement Documents"
+  },
+  {
+   "fieldname": "generated_document_type",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Generated Document Type",
+   "options": "DocType",
+   "read_only": 1
+  },
+  {
+   "fieldname": "generated_document",
+   "fieldtype": "Dynamic Link",
+   "hidden": 1,
+   "label": "Generated Document",
+   "options": "generated_document_type",
+   "read_only": 1
+  },
+  {
+   "fieldname": "debit_note",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Debit Note",
+   "options": "Purchase Invoice",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Processor Lot",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center",
+   "read_only": 1
+  },
+  {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "label": "Branch",
+   "options": "Branch",
+   "read_only": 1
+  },
+  {
+   "fieldname": "health_panel_section",
+   "fieldtype": "Section Break",
+   "label": "ERP Lot Health"
+  },
+  {
+   "fieldname": "health_panel_html",
+   "fieldtype": "HTML"
+  },
+  {
+   "fieldname": "lot_information_section",
+   "fieldtype": "Section Break",
+   "label": "Lot Information"
+  },
+  {
+   "fieldname": "column_break_ddub",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_receipt_date",
+   "fieldtype": "Date",
+   "label": "Last Receipt Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "receipt_summary_section",
+   "fieldtype": "Section Break",
+   "label": "Receipt Summary"
+  },
+  {
+   "default": "0",
+   "fieldname": "receipt_count",
+   "fieldtype": "Int",
+   "label": "Receipt Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "receipt_stock_uom",
+   "fieldtype": "Link",
+   "label": "Stock UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "receipt_summary_column_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "total_supplier_net_weight",
+   "fieldtype": "Float",
+   "label": "Total Supplier Net Weight",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "total_company_net_weight",
+   "fieldtype": "Float",
+   "label": "Total Company Net Weight",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "total_supplier_invoice_qty",
+   "fieldtype": "Float",
+   "label": "Total Supplier Invoice Qty",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "receipt_journey_section",
+   "fieldtype": "Section Break",
+   "label": "Receipt Journey"
+  },
+  {
+   "fieldname": "receipt_journey_html",
+   "fieldtype": "HTML"
+  },
+  {
+   "fieldname": "section_break_imfd",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "processor_settlement_policy_section",
+   "fieldtype": "Section Break",
+   "label": "Processor Settlement Policy"
+  },
+  {
+   "default": "0",
+   "fieldname": "recover_raw_material_shortage",
+   "fieldtype": "Check",
+   "label": "Recover Raw Material Shortage",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "recover_processing_charges_on_shortage",
+   "fieldtype": "Check",
+   "label": "Recover Processing Charges on Shortage",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_redo",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "settlement_basis",
+   "fieldtype": "Select",
+   "label": "Settlement Basis",
+   "options": "Company Accepted Quantity\nSupplier Invoice Quantity\nManual",
+   "read_only": 1
+  },
+  {
+   "fieldname": "settlement_remarks",
+   "fieldtype": "Small Text",
+   "label": "Settlement Remarks",
+   "read_only": 1
+  },
+  {
+   "fieldname": "settlement_policy_source",
+   "fieldtype": "Select",
+   "label": "Settlement Policy Source",
+   "options": "Purchase Order\nOverridden",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "settlement_policy_override_section",
+   "fieldtype": "Section Break",
+   "label": "Settlement Policy Override"
+  },
+  {
+   "default": "0",
+   "fieldname": "override_settlement_policy",
+   "fieldtype": "Check",
+   "label": "Override Settlement Policy"
+  },
+  {
+   "fieldname": "column_break_muva",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "overridden_by",
+   "fieldtype": "Link",
+   "label": "Overridden By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "settlement_policy_overridden_on",
+   "fieldtype": "Datetime",
+   "label": "Overridden On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "settlement_policy_override_reason",
+   "fieldtype": "Small Text",
+   "label": "Override Reason"
+  },
+  {
+   "fieldname": "total_company_accepted_qty",
+   "fieldtype": "Float",
+   "label": "Total Company Accepted Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "physical_receipt_position_section",
+   "fieldtype": "Section Break",
+   "label": "Physical Receipt Position"
+  },
+  {
+   "fieldname": "physical_receipt_position_html",
+   "fieldtype": "HTML"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [
+  {
+   "link_doctype": "Purchase Invoice",
+   "link_fieldname": "custom_processor_lot_settlement"
+  }
+ ],
+ "modified": "2026-08-08 07:11:57.622926",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Extensions",
+ "name": "Processor Lot",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Stock Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Purchase Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
