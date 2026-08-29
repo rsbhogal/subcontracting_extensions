@@ -18,6 +18,7 @@ Version 1
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 import frappe
@@ -328,6 +329,46 @@ def _get_settlement_policy(
         "settlement_remarks":
             purchase_order.custom_settlement_remarks,
     }
+
+
+def apply_processor_lot_settlement_policy(
+    facts: dict[str, Any],
+    processor_lot,
+) -> dict[str, Any]:
+    """Return facts with the Processor Lot's effective policy snapshot.
+
+    The Fact Engine continues to report the originating Purchase Order
+    contract by default. Settlement workflows that operate on a specific
+    Processor Lot must use its controlled snapshot, including any audited
+    lot-level override.
+    """
+    effective_facts = deepcopy(facts or {})
+    purchase_order_policy = dict(
+        effective_facts.get("settlement_policy") or {}
+    )
+
+    purchase_order_policy.update(
+        {
+            "policy_available": True,
+            "policy_source": (
+                processor_lot.settlement_policy_source
+                or "Purchase Order"
+            ),
+            "purchase_order": processor_lot.purchase_order,
+            "recover_raw_material_shortage": bool(
+                processor_lot.recover_raw_material_shortage
+            ),
+            "recover_processing_charges_on_shortage": bool(
+                processor_lot
+                .recover_processing_charges_on_shortage
+            ),
+            "settlement_basis": processor_lot.settlement_basis,
+            "settlement_remarks": processor_lot.settlement_remarks,
+        }
+    )
+
+    effective_facts["settlement_policy"] = purchase_order_policy
+    return effective_facts
 
 def _get_material_transfer_facts(
     sco,

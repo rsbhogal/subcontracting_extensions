@@ -58,6 +58,7 @@ from erpnext.controllers.accounts_controller import (
 )
 
 from subcontracting_extensions.subcontracting_extensions.doctype.processor_lot.fact_engine import (
+    apply_processor_lot_settlement_policy,
     get_sco_facts,
 )
 from subcontracting_extensions.subcontracting_extensions.doctype.processor_lot.recovery_calculator import (
@@ -113,6 +114,10 @@ def create_shortage_debit_note(
 
     facts = get_sco_facts(
         processor_lot.subcontracting_order
+    )
+    facts = apply_processor_lot_settlement_policy(
+        facts,
+        processor_lot,
     )
 
     recommendation = recommend_settlement(

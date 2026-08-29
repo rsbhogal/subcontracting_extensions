@@ -42,6 +42,7 @@ from frappe import _
 
 SUPPORTED_CLASSIFICATIONS = {
     "accepted_process_loss",
+    "commercial_variance_only",
     "recoverable_shortage",
     "components_returned",
     "pending_investigation",
@@ -66,6 +67,7 @@ def recommend_settlement(
         Supported values:
 
         - accepted_process_loss
+        - commercial_variance_only
         - recoverable_shortage
         - components_returned
         - pending_investigation
@@ -94,6 +96,12 @@ def recommend_settlement(
 
     outstanding_qty = _as_number(
         physical_inventory.get("outstanding_qty")
+    )
+
+    commercial_variance_qty = _as_number(
+        (summary.get("comparisons") or {}).get(
+            "invoice_vs_scr_received"
+        )
     )
 
     outstanding_uom = _get_outstanding_uom(
@@ -130,11 +138,36 @@ def recommend_settlement(
             }
         )
 
+    if business_classification == "commercial_variance_only":
+        if outstanding_qty > 0.000001:
+            blocking_errors.append(
+                {
+                    "code": "PHYSICAL_OUTSTANDING_QTY_REMAINS",
+                    "message": _(
+                        "Commercial Variance Only cannot be used while "
+                        "a positive physical outstanding quantity remains."
+                    ),
+                }
+            )
+
+        if commercial_variance_qty <= 0.000001:
+            blocking_errors.append(
+                {
+                    "code": "COMMERCIAL_VARIANCE_NOT_POSITIVE",
+                    "message": _(
+                        "Commercial Variance Only requires a positive "
+                        "Supplier Invoice versus Company Accepted "
+                        "quantity variance."
+                    ),
+                }
+            )
+
     recommendation = _build_recommendation(
         business_classification=business_classification,
         settlement_policy=settlement_policy,
         outstanding_qty=outstanding_qty,
         outstanding_uom=outstanding_uom,
+        commercial_variance_qty=commercial_variance_qty,
         blocking_errors=blocking_errors,
     )
 
@@ -221,6 +254,7 @@ def recommend_settlement(
         "facts": {
             "outstanding_qty": outstanding_qty,
             "outstanding_uom": outstanding_uom,
+            "commercial_variance_qty": commercial_variance_qty,
         },
         "classification": {
             "value": business_classification,
@@ -353,6 +387,7 @@ def _build_recommendation(
     settlement_policy: dict[str, Any],
     outstanding_qty: float,
     outstanding_uom: str,
+    commercial_variance_qty: float,
     blocking_errors: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Interpret the business classification and contractual policy."""
@@ -386,6 +421,39 @@ def _build_recommendation(
                 "The outstanding quantity has been confirmed as material consumed "
                 "during normal processing and accepted as process loss. No raw "
                 "material or processing-charge recovery is recommended."
+            ),
+        }
+
+    if business_classification == "commercial_variance_only":
+        recover_processing_charges = bool(
+            settlement_policy.get(
+                "recover_processing_charges_on_shortage"
+            )
+        )
+
+        return {
+            "recommend_recover_raw_material": False,
+            "recommend_recover_processing_charges": (
+                recover_processing_charges
+            ),
+            "recommended_settlement_basis": settlement_basis,
+            "recommendation_status": (
+                "Recovery Recommended"
+                if recover_processing_charges
+                else "No Recovery Recommended"
+            ),
+            "recommended_next_step": (
+                "Calculate applicable recovery"
+                if recover_processing_charges
+                else "Review lot for closure"
+            ),
+            "explanation": _build_commercial_variance_explanation(
+                commercial_variance_qty=commercial_variance_qty,
+                commercial_variance_uom=outstanding_uom,
+                recover_processing_charges=(
+                    recover_processing_charges
+                ),
+                settlement_basis=settlement_basis,
             ),
         }
 
@@ -520,45 +588,76 @@ def _build_reasoning(
     )
 
     if settlement_policy.get("policy_available"):
-        reasoning.append(
-            {
-                "sequence": 30,
-                "type": "policy",
-                "code": "RAW_MATERIAL_POLICY",
-                "message": (
-                    _(
-                        "The Purchase Order permits recovery of raw "
-                        "material shortage."
-                    )
-                    if settlement_policy.get(
-                        "recover_raw_material_shortage"
-                    )
-                    else _(
-                        "The Purchase Order does not permit recovery of "
-                        "raw material shortage."
-                    )
-                ),
-            }
+        if business_classification == "commercial_variance_only":
+            reasoning.append(
+                {
+                    "sequence": 30,
+                    "type": "policy",
+                    "code": "RAW_MATERIAL_NOT_APPLICABLE",
+                    "message": _(
+                        "Raw-material recovery does not apply because "
+                        "no physical outstanding quantity remains."
+                    ),
+                }
+            )
+        else:
+            reasoning.append(
+                {
+                    "sequence": 30,
+                    "type": "policy",
+                    "code": "RAW_MATERIAL_POLICY",
+                    "message": (
+                        _(
+                            "The effective settlement policy permits "
+                            "recovery of raw material shortage."
+                        )
+                        if settlement_policy.get(
+                            "recover_raw_material_shortage"
+                        )
+                        else _(
+                            "The effective settlement policy does not "
+                            "permit recovery of raw material shortage."
+                        )
+                    ),
+                }
+            )
+
+        processing_recovery_permitted = settlement_policy.get(
+            "recover_processing_charges_on_shortage"
         )
+        if business_classification == "commercial_variance_only":
+            processing_policy_message = (
+                _(
+                    "The effective settlement policy permits recovery "
+                    "of processing charges on the positive commercial "
+                    "variance."
+                )
+                if processing_recovery_permitted
+                else _(
+                    "The effective settlement policy does not permit "
+                    "recovery of processing charges on the positive "
+                    "commercial variance."
+                )
+            )
+        else:
+            processing_policy_message = (
+                _(
+                    "The effective settlement policy permits recovery "
+                    "of processing charges on shortage."
+                )
+                if processing_recovery_permitted
+                else _(
+                    "The effective settlement policy does not permit "
+                    "recovery of processing charges on shortage."
+                )
+            )
 
         reasoning.append(
             {
                 "sequence": 40,
                 "type": "policy",
                 "code": "PROCESSING_CHARGE_POLICY",
-                "message": (
-                    _(
-                        "The Purchase Order permits recovery of processing "
-                        "charges on shortage."
-                    )
-                    if settlement_policy.get(
-                        "recover_processing_charges_on_shortage"
-                    )
-                    else _(
-                        "The Purchase Order does not permit recovery of "
-                        "processing charges on shortage."
-                    )
-                ),
+                "message": processing_policy_message,
             }
         )
 
@@ -700,6 +799,40 @@ def _build_shortage_explanation(
         settlement_basis or _("not defined"),
     )
 
+
+def _build_commercial_variance_explanation(
+    commercial_variance_qty: float,
+    commercial_variance_uom: str,
+    recover_processing_charges: bool,
+    settlement_basis: str | None,
+) -> str:
+    """Explain a positive commercial variance with no physical shortage."""
+    quantity_text = _format_qty(commercial_variance_qty)
+
+    if commercial_variance_uom:
+        quantity_text = (
+            f"{quantity_text} {commercial_variance_uom}"
+        )
+
+    if recover_processing_charges:
+        return _(
+            "The physical receipt position is complete. The Supplier "
+            "Invoice quantity exceeds the Company Accepted quantity by "
+            "{0}. No raw-material recovery applies. The effective "
+            "settlement policy recommends recovery of processing charges "
+            "on this commercial variance using Settlement Basis {1}."
+        ).format(
+            quantity_text,
+            settlement_basis or _("not defined"),
+        )
+
+    return _(
+        "The physical receipt position is complete. The Supplier Invoice "
+        "quantity exceeds the Company Accepted quantity by {0}. No "
+        "raw-material recovery applies, and the effective settlement "
+        "policy does not require processing-charge recovery."
+    ).format(quantity_text)
+
 def _get_classification_label(
     business_classification: str,
 ) -> str:
@@ -707,6 +840,9 @@ def _get_classification_label(
     labels = {
         "accepted_process_loss": _(
             "Consumed as Accepted Process Loss"
+        ),
+        "commercial_variance_only": _(
+            "Commercial Variance Only"
         ),
         "recoverable_shortage": _(
             "Material Not Returned by Processor"

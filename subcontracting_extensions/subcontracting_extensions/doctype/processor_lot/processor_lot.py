@@ -33,9 +33,10 @@ import frappe
 from frappe import _
 from frappe.desk.search import validate_and_sanitize_search_inputs
 from frappe.model.document import Document
-from frappe.utils import flt, now_datetime
+from frappe.utils import flt, get_datetime, now_datetime
 
 from subcontracting_extensions.subcontracting_extensions.doctype.processor_lot.fact_engine import (
+    apply_processor_lot_settlement_policy,
     get_sco_facts,
 )
 from subcontracting_extensions.subcontracting_extensions.doctype.processor_lot.settlement_recommendation import (
@@ -90,6 +91,10 @@ class ProcessorLot(Document):
 
         facts = get_sco_facts(
             self.subcontracting_order
+        )
+        facts = apply_processor_lot_settlement_policy(
+            facts,
+            self,
         )
 
         outstanding_qty = flt(
@@ -529,7 +534,7 @@ class ProcessorLot(Document):
 
         audit_fields = (
             "settlement_policy_source",
-            "settlement_policy_overridden_by",
+            "overridden_by",
             "settlement_policy_overridden_on",
         )
 
@@ -545,7 +550,7 @@ class ProcessorLot(Document):
             if not self.override_settlement_policy:
                 self.settlement_policy_source = "Purchase Order"
                 self.settlement_policy_override_reason = None
-                self.settlement_policy_overridden_by = None
+                self.overridden_by = None
                 self.settlement_policy_overridden_on = None
                 return
 
@@ -563,7 +568,7 @@ class ProcessorLot(Document):
                 )
 
             self.settlement_policy_source = "Overridden"
-            self.settlement_policy_overridden_by = frappe.session.user
+            self.overridden_by = frappe.session.user
             self.settlement_policy_overridden_on = now_datetime()
             return
 
@@ -583,11 +588,26 @@ class ProcessorLot(Document):
             != previous_doc.settlement_policy_override_reason
         )
 
-        audit_fields_changed = [
-            fieldname
-            for fieldname in audit_fields
-            if self.get(fieldname) != previous_doc.get(fieldname)
-        ]
+        audit_fields_changed = []
+
+        for fieldname in audit_fields:
+            current_value = self.get(fieldname)
+            previous_value = previous_doc.get(fieldname)
+
+            # Form JSON carries Datetime values as strings while the saved
+            # document uses datetime objects. Compare the authoritative audit
+            # timestamp as a datetime so an unchanged Draft override does not
+            # appear modified during the Draft-to-Submitted transition.
+            if fieldname == "settlement_policy_overridden_on":
+                current_value = (
+                    get_datetime(current_value) if current_value else None
+                )
+                previous_value = (
+                    get_datetime(previous_value) if previous_value else None
+                )
+
+            if current_value != previous_value:
+                audit_fields_changed.append(fieldname)
 
         override_related_change = bool(
             changed_policy_fields
@@ -649,7 +669,7 @@ class ProcessorLot(Document):
             self.settlement_policy_source = "Overridden"
 
             if meaningful_override_change:
-                self.settlement_policy_overridden_by = (
+                self.overridden_by = (
                     frappe.session.user
                 )
                 self.settlement_policy_overridden_on = now_datetime()
@@ -665,7 +685,7 @@ class ProcessorLot(Document):
             )
 
             self.settlement_policy_override_reason = None
-            self.settlement_policy_overridden_by = None
+            self.overridden_by = None
             self.settlement_policy_overridden_on = None
 
     # ---------------------------------------------------------------------
@@ -1002,16 +1022,24 @@ class ProcessorLot(Document):
         )
 
         if commercial_variance_qty > 0.000001:
-            frappe.throw(
-                _(
-                    "Processor Lot has a positive commercial quantity "
-                    "variance of {0}. Complete commercial settlement "
-                    "before closing this Processor Lot."
-                ).format(
-                    frappe.bold(commercial_variance_qty)
-                ),
-                title=_("Commercial Settlement Pending"),
-            )
+            settlement_policy = facts.get("settlement_policy") or {}
+
+            if not settlement_policy.get("policy_available"):
+                frappe.throw(
+                    _(
+                        "Processor Lot has a positive commercial "
+                        "quantity variance of {0}, but its effective "
+                        "settlement policy is unavailable."
+                    ).format(
+                        frappe.bold(commercial_variance_qty)
+                    ),
+                    title=_("Settlement Policy Unavailable"),
+                )
+
+            if settlement_policy.get(
+                "recover_processing_charges_on_shortage"
+            ):
+                self._validate_submitted_settlement_document()
 
         received_qty = flt(
             physical.get("scr_received_qty")
@@ -2387,16 +2415,49 @@ def unlink_processor_lot_settlement_debit_note(
 
     lot.save()
 
+def _get_effective_processor_lot_facts(
+    subcontracting_order: str,
+    processor_lot: str | None = None,
+) -> dict[str, Any]:
+    """Return SCO facts with a specific lot's effective policy snapshot."""
+    facts = get_sco_facts(subcontracting_order)
+
+    if not processor_lot:
+        return facts
+
+    lot = frappe.get_doc("Processor Lot", processor_lot)
+
+    if lot.subcontracting_order != subcontracting_order:
+        frappe.throw(
+            _(
+                "Processor Lot {0} does not belong to Subcontracting "
+                "Order {1}."
+            ).format(
+                frappe.bold(lot.name),
+                frappe.bold(subcontracting_order),
+            )
+        )
+
+    return apply_processor_lot_settlement_policy(
+        facts,
+        lot,
+    )
+
+
 @frappe.whitelist()
 def get_processor_lot_fact_summary(
     subcontracting_order: str,
+    processor_lot: str | None = None,
 ) -> dict[str, Any]:
     """
     Return the read-only Fact Engine result for one Subcontracting Order.
 
     This method does not save, submit, cancel or create any document.
     """
-    return get_sco_facts(subcontracting_order)
+    return _get_effective_processor_lot_facts(
+        subcontracting_order=subcontracting_order,
+        processor_lot=processor_lot,
+    )
 
 @frappe.whitelist()
 def get_processor_lot_lifecycle_state(
@@ -2415,6 +2476,7 @@ def get_processor_lot_lifecycle_state(
 def get_processor_lot_recommendation(
     subcontracting_order: str,
     business_classification: str,
+    processor_lot: str | None = None,
 ) -> dict[str, Any]:
     """
     Return the current settlement recommendation for one
@@ -2432,7 +2494,10 @@ def get_processor_lot_recommendation(
     if not business_classification:
         frappe.throw(_("Business Classification is required."))
 
-    facts = get_sco_facts(subcontracting_order)
+    facts = _get_effective_processor_lot_facts(
+        subcontracting_order=subcontracting_order,
+        processor_lot=processor_lot,
+    )
 
     return recommend_settlement(
         facts,
@@ -2443,6 +2508,7 @@ def get_processor_lot_recommendation(
 def get_processor_lot_recovery(
     subcontracting_order: str,
     business_classification: str,
+    processor_lot: str | None = None,
 ) -> dict[str, Any]:
     """
     Return the calculated commercial recovery for one
@@ -2471,8 +2537,9 @@ def get_processor_lot_recovery(
             _("Business Classification is required.")
         )
 
-    facts = get_sco_facts(
-        subcontracting_order
+    facts = _get_effective_processor_lot_facts(
+        subcontracting_order=subcontracting_order,
+        processor_lot=processor_lot,
     )
 
     recommendation = recommend_settlement(

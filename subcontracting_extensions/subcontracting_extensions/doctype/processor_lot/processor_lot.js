@@ -804,7 +804,7 @@ function refresh_settlement_action(frm) {
     }
 
     if (frm.doc.settlement_action !== settlement_action) {
-        refresh_settlement_action(frm);
+        frm.set_value("settlement_action", settlement_action);
     }
 }
 
@@ -866,7 +866,7 @@ function apply_settlement_policy_override_properties(frm) {
      */
     [
         "settlement_policy_source",
-        "settlement_policy_overridden_by",
+        "overridden_by",
         "settlement_policy_overridden_on"
     ].forEach(fieldname => {
         frm.set_df_property(
@@ -884,7 +884,7 @@ function apply_settlement_policy_override_properties(frm) {
         "settlement_remarks",
         "settlement_policy_override_reason",
         "settlement_policy_source",
-        "settlement_policy_overridden_by",
+        "overridden_by",
         "settlement_policy_overridden_on"
     ]);
 }
@@ -1235,7 +1235,8 @@ function add_reopened_settlement_buttons(frm) {
                     "get_processor_lot_fact_summary"
                 ].join("."),
                 args: {
-                    subcontracting_order: frm.doc.subcontracting_order
+                    subcontracting_order: frm.doc.subcontracting_order,
+                    processor_lot: frm.doc.name
                 },
                 freeze: true,
                 freeze_message: __("Loading current lot facts..."),
@@ -1632,7 +1633,8 @@ function show_lot_facts_dialog(frm) {
             "get_processor_lot_fact_summary"
         ].join("."),
         args: {
-            subcontracting_order: frm.doc.subcontracting_order
+            subcontracting_order: frm.doc.subcontracting_order,
+            processor_lot: frm.doc.name
         },
         freeze: true,
         freeze_message: __("Loading current lot facts..."),
@@ -3526,7 +3528,8 @@ function render_health_panel(frm) {
             "get_processor_lot_fact_summary"
         ].join("."),
         args: {
-            subcontracting_order: frm.doc.subcontracting_order
+            subcontracting_order: frm.doc.subcontracting_order,
+            processor_lot: frm.doc.name
         },
         callback(r) {
             const facts = r.message;
@@ -4086,6 +4089,10 @@ function build_health_panel_html(frm, facts, lifecycle, debit_note_state) {
         0
     );
 
+    const processing_recovery_required = Boolean(
+        frm.doc.recover_processing_charges_on_shortage
+    );
+
 
     /*
     * A newly created Processor Lot may exist before any raw material has
@@ -4312,7 +4319,11 @@ function build_health_panel_html(frm, facts, lifecycle, debit_note_state) {
             alternate_action_label = "";
             alternate_action_detail = "";
 
-            if (commercial_variance_remaining_qty > 0) {
+            if (
+                commercial_variance_remaining_qty > 0
+                && processing_recovery_required
+                && frm.doc.docstatus === 0
+            ) {
                 workflow_label = __(
                     "Commercial Reconciliation Pending"
                 );
@@ -4358,6 +4369,42 @@ function build_health_panel_html(frm, facts, lifecycle, debit_note_state) {
                 );
                 next_action_detail = __(
                     "Create the residual Debit Note for the remaining commercial recovery."
+                );
+            } else if (
+                commercial_variance_remaining_qty > 0
+                && frm.doc.docstatus === 0
+            ) {
+                workflow_label = __("Ready for Closure");
+                workflow_class = "lot-health-status-good";
+                workflow_dot_class = "lot-health-dot-good";
+                message_class = "lot-health-message-success";
+                message_heading = frm.doc.override_settlement_policy
+                    ? __("Commercial recovery waived")
+                    : __("Commercial recovery not required");
+                message_text = frm.doc.override_settlement_policy
+                    ? __(
+                        "Management has waived processing-charge recovery on the {0} commercial variance through the audited Processor Lot policy override.",
+                        [
+                            format_qty_with_uom(
+                                commercial_variance_remaining_qty,
+                                finished_uom
+                            )
+                        ]
+                    )
+                    : __(
+                        "The effective settlement policy does not require processing-charge recovery on the {0} commercial variance.",
+                        [
+                            format_qty_with_uom(
+                                commercial_variance_remaining_qty,
+                                finished_uom
+                            )
+                        ]
+                    );
+
+                next_action = "submit-processor-lot";
+                next_action_label = __("Submit Processor Lot");
+                next_action_detail = __(
+                    "Submit this Processor Lot to close its lifecycle."
                 );
             } else if (frm.doc.docstatus === 1) {
                 workflow_class = "lot-health-status-good";
@@ -5130,6 +5177,7 @@ function open_reconciliation_wizard(frm, facts) {
     const entrustment = summary.entrustment || {};
     const physical = summary.physical_inventory || {};
     const commercial = summary.commercial || {};
+    const comparisons = summary.comparisons || {};
 
     const entrusted_qty = flt(
         entrustment.sco_supplied_qty
@@ -5145,6 +5193,10 @@ function open_reconciliation_wizard(frm, facts) {
 
     const invoice_qty = flt(
         commercial.purchase_invoice_qty
+    );
+
+    const commercial_variance_qty = flt(
+        comparisons.invoice_vs_scr_received
     );
 
     const integrity_issue_count =
@@ -5234,7 +5286,13 @@ function open_reconciliation_wizard(frm, facts) {
 
                 ${step_html(1, __("Review Facts"))}
 
-                ${step_html(2, __("Confirm Physical Reality"))}
+                ${step_html(
+                    2,
+                    wizard_state.business_classification
+                        === "commercial_variance_only"
+                        ? __("Physical Position Complete")
+                        : __("Confirm Physical Reality")
+                )}
 
                 ${step_html(3, __("Review Recommendation"))}
 
@@ -5369,7 +5427,7 @@ function open_reconciliation_wizard(frm, facts) {
                         color:#666;
                     ">
                         ${__(
-                            "Review the facts before confirming the physical reality."
+                            "Review the facts before continuing with reconciliation."
                         )}
                     </div>
 
@@ -5381,6 +5439,18 @@ function open_reconciliation_wizard(frm, facts) {
         dialog.set_primary_action(
             __("Continue"),
             () => {
+                if (
+                    outstanding_qty <= 0.000001
+                    && commercial_variance_qty > 0.000001
+                ) {
+                    wizard_state.business_classification =
+                        "commercial_variance_only";
+                    wizard_state.recommendation = null;
+                    wizard_state.recovery = null;
+                    render_step_3();
+                    return;
+                }
+
                 render_step_2();
             }
         );
@@ -5800,6 +5870,18 @@ function open_reconciliation_wizard(frm, facts) {
         );
     }
 
+    function return_to_classification_step() {
+        if (
+            wizard_state.business_classification
+            === "commercial_variance_only"
+        ) {
+            render_step_1();
+            return;
+        }
+
+        render_step_2();
+    }
+
 /**
  * Display Step 3 — Review Recommendation.
  *
@@ -5862,7 +5944,7 @@ function render_step_3() {
     dialog.set_secondary_action_label(__("Back"));
 
     dialog.set_secondary_action(() => {
-        render_step_2();
+        return_to_classification_step();
     });
 
     frappe.call({
@@ -5877,6 +5959,8 @@ function render_step_3() {
         args: {
             subcontracting_order:
                 frm.doc.subcontracting_order,
+
+            processor_lot: frm.doc.name,
 
             business_classification:
                 wizard_state.business_classification
@@ -5893,14 +5977,14 @@ function render_step_3() {
                     )
                 });
 
-                render_step_2();
+                return_to_classification_step();
                 return;
             }
 
             display_recommendation(recommendation);
         },
         error() {
-            render_step_2();
+            return_to_classification_step();
         }
     });
 }
@@ -5969,7 +6053,10 @@ function display_recommendation(recommendation) {
                 __("Material Physically Returned"),
 
             pending_investigation:
-                __("Physical Position Not Yet Confirmed")
+                __("Physical Position Not Yet Confirmed"),
+
+            commercial_variance_only:
+                __("Commercial Variance Only")
         };
 
         return labels[classification]
@@ -6229,7 +6316,7 @@ function display_recommendation(recommendation) {
     dialog.set_secondary_action_label(__("Back"));
 
     dialog.set_secondary_action(() => {
-        render_step_2();
+        return_to_classification_step();
     });
 
     dialog.get_primary_btn().prop("disabled", false);
@@ -6337,6 +6424,8 @@ function render_step_4() {
             subcontracting_order:
                 frm.doc.subcontracting_order,
 
+            processor_lot: frm.doc.name,
+
             business_classification:
                 wizard_state.business_classification
         },
@@ -6426,12 +6515,31 @@ function display_recovery(recovery) {
     let quantity_heading =
         __("Outstanding Quantity Reviewed");
 
+    let reviewed_quantity = flt(
+        quantity.shortage_qty
+    );
+
+    let reviewed_uom = quantity.shortage_uom;
+
     if (
         physical_classification === "recoverable_shortage"
         && recovery_is_recommended
     ) {
         quantity_heading =
             __("Outstanding Quantity to Recover");
+    } else if (
+        physical_classification === "commercial_variance_only"
+    ) {
+        quantity_heading =
+            __("Commercial Variance Reviewed");
+        reviewed_quantity = flt(
+            wizard_state.recommendation
+                ?.evidence
+                ?.facts
+                ?.commercial_variance_qty
+            || processing_charges.quantity
+        );
+        reviewed_uom = processing_charges.uom;
     }
 
     const calculation_heading =
@@ -6441,6 +6549,91 @@ function display_recovery(recovery) {
     const warnings = integrity.warnings || [];
     const blocking_errors =
         integrity.blocking_errors || [];
+
+    const commercial_waiver_is_relevant = Boolean(
+        physical_classification === "commercial_variance_only"
+        && recovery_is_recommended
+        && blocking_errors.length === 0
+        && frm.doc.docstatus === 0
+        && !frm.doc.debit_note
+    );
+
+    const commercial_waiver_is_allowed = Boolean(
+        commercial_waiver_is_relevant
+        && frappe.user.has_role("System Manager")
+    );
+
+    const commercial_waiver_html = commercial_waiver_is_relevant
+        ? `
+            <div style="
+                border:1px solid var(--orange-300);
+                border-left:4px solid var(--orange-500);
+                border-radius:8px;
+                padding:14px 15px;
+                margin:14px 0;
+                background:var(--orange-50);
+            ">
+                <div style="
+                    font-size:14px;
+                    font-weight:700;
+                    margin-bottom:6px;
+                ">
+                    ${__("Management Decision")}
+                </div>
+
+                <div style="line-height:1.5;">
+                    ${commercial_waiver_is_allowed
+                        ? __(
+                            "The effective policy recommends creating the Debit Note shown below. Management may instead choose not to recover this minor amount."
+                        )
+                        : __(
+                            "The effective policy recommends creating the Debit Note shown below. Only a System Manager may approve an alternative waiver."
+                        )}
+                </div>
+
+                ${commercial_waiver_is_allowed ? `
+                    <div style="
+                        border-top:1px solid var(--orange-300);
+                        margin-top:12px;
+                        padding-top:12px;
+                    ">
+                        <div style="
+                            color:var(--orange-700);
+                            font-size:11px;
+                            font-weight:700;
+                            letter-spacing:0.04em;
+                            margin-bottom:8px;
+                            text-transform:uppercase;
+                        ">
+                            ${__("Alternative to Debit Note")}
+                        </div>
+
+                        <button
+                            type="button"
+                            class="btn btn-warning btn-sm"
+                            data-action="waive-commercial-recovery"
+                            style="
+                                font-weight:700;
+                                min-height:34px;
+                                padding:7px 14px;
+                            "
+                        >
+                            ${__("Waive Recommended Recovery")}
+                        </button>
+
+                        <div style="
+                            color:var(--text-muted);
+                            font-size:11px;
+                            line-height:1.45;
+                            margin-top:7px;
+                        ">
+                            ${__("A mandatory reason and the approving user will be recorded for audit.")}
+                        </div>
+                    </div>
+                ` : ""}
+            </div>
+        `
+        : "";
 
     const currency =
         recovery.currency
@@ -6802,8 +6995,8 @@ function display_recovery(recovery) {
                         color:#d35400;
                     ">
                         ${format_qty(
-                            quantity.shortage_qty,
-                            quantity.shortage_uom
+                            reviewed_quantity,
+                            reviewed_uom
                         )}
                     </div>
                 </div>
@@ -6987,6 +7180,8 @@ function display_recovery(recovery) {
 
                 ${material_credit_html}
 
+                ${commercial_waiver_html}
+
                 <details style="
                     border:1px solid var(--border-color);
                     border-radius:7px;
@@ -7026,6 +7221,14 @@ function display_recovery(recovery) {
                     name
                 );
             }
+        });
+
+    wrapper
+        .find('[data-action="waive-commercial-recovery"]')
+        .off("click.processor_lot_waiver")
+        .on("click.processor_lot_waiver", event => {
+            event.preventDefault();
+            waive_commercial_recovery();
         });
 
     dialog.set_secondary_action_label(__("Back"));
@@ -7081,6 +7284,84 @@ function display_recovery(recovery) {
         "disabled",
         blocking_errors.length > 0
     );
+
+    function waive_commercial_recovery() {
+        if (!frappe.user.has_role("System Manager")) {
+            frappe.msgprint({
+                title: __("System Manager Required"),
+                indicator: "orange",
+                message: __(
+                    "Only a System Manager may waive the recommended recovery."
+                )
+            });
+            return;
+        }
+
+        if (frm.is_dirty()) {
+            frappe.msgprint({
+                title: __("Unsaved Changes"),
+                indicator: "orange",
+                message: __(
+                    "Save or discard the existing Processor Lot changes before recording the waiver."
+                )
+            });
+            return;
+        }
+
+        frappe.prompt(
+            [
+                {
+                    fieldname: "waiver_reason",
+                    fieldtype: "Small Text",
+                    label: __("Waiver Reason"),
+                    reqd: 1
+                }
+            ],
+            values => {
+                const reason = String(
+                    values.waiver_reason || ""
+                ).trim();
+
+                if (!reason) {
+                    return;
+                }
+
+                frappe.confirm(
+                    __(
+                        "Waive the recommended processing-charge recovery and record this reason on the Processor Lot?"
+                    ),
+                    () => {
+                        Promise.resolve(
+                            frm.set_value(
+                                "override_settlement_policy",
+                                1
+                            )
+                        )
+                            .then(() => frm.set_value(
+                                "recover_processing_charges_on_shortage",
+                                0
+                            ))
+                            .then(() => frm.set_value(
+                                "settlement_policy_override_reason",
+                                reason
+                            ))
+                            .then(() => frm.save())
+                            .then(() => {
+                                dialog.hide();
+                                frappe.show_alert({
+                                    message: __(
+                                        "Commercial recovery waiver recorded."
+                                    ),
+                                    indicator: "green"
+                                });
+                            });
+                    }
+                );
+            },
+            __("Waive Recommended Recovery"),
+            __("Review Waiver")
+        );
+    }
 
     function create_draft_credit_application() {
         if (frm.is_new() || !frm.doc.name || frm.is_dirty()) {
