@@ -1,1 +1,1 @@
-"""Idempotent setup helpers for Bhogal Core."""
+"""Idempotent setup helpers for Subcontracting Extensions."""

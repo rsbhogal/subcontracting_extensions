@@ -55,7 +55,7 @@ def _get_parent_account() -> str:
 
 	frappe.throw(
 		_(
-			"Bhogal Core requires an enabled group Account named {0} "
+			"Subcontracting Extensions requires an enabled group Account named {0} "
 			"for Company {1} before Processor Material Credit Accounts "
 			"can be configured."
 		).format(
