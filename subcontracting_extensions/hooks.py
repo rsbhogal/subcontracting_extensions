@@ -7,15 +7,29 @@ app_license = "mit"
 
 required_apps = ["erpnext"]
 
-after_install = (
-	"subcontracting_extensions.setup.processor_material_accounts."
-	"ensure_processor_material_accounts"
-)
+after_install = [
+        (
+                "subcontracting_extensions.setup."
+                "processor_material_accounts."
+                "ensure_processor_material_accounts"
+        ),
+        (
+                "subcontracting_extensions.setup.ownership."
+                "ensure_subcontracting_report_ownership"
+        ),
+]
 
-after_migrate = (
-	"subcontracting_extensions.setup.processor_material_accounts."
-	"ensure_processor_material_accounts"
-)
+after_migrate = [
+        (
+                "subcontracting_extensions.setup."
+                "processor_material_accounts."
+                "ensure_processor_material_accounts"
+        ),
+        (
+                "subcontracting_extensions.setup.ownership."
+                "ensure_subcontracting_report_ownership"
+        ),
+]
 
 fixtures = [
 	{
