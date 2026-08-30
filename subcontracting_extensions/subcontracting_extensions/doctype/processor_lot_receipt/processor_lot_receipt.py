@@ -25,6 +25,11 @@ from subcontracting_extensions.subcontracting_extensions.doctype.processor_lot.p
 )
 
 
+LEGACY_RECEIPT_STRUCTURE = "Legacy Single Item"
+V2_RECEIPT_STRUCTURE = "V2 Itemized"
+ITEM_QUANTITY_PRECISION = 6
+
+
 def _calculate_material_credit_invoice_qty(
 	invoice_qty: float,
 	lot_backed_qty: float,
@@ -107,11 +112,19 @@ class ProcessorLotReceipt(Document):
 		"""
 
 		self._validate_processor_lot_immutability()
+		self._validate_receipt_structure_immutability()
 
 		if not self.processor_lot:
 			return
 
 		self._set_header_from_processor_lot()
+
+		if self._uses_v2_item_structure():
+			self._prepare_v2_receipt_items()
+			self._calculate_v2_item_commercial_reconciliation()
+			self._sync_single_v2_item_to_legacy_header()
+			return
+
 		self._set_processed_item_from_sco()
 		self._calculate_net_weights()
 		self._set_company_accepted_qty_from_measurement()
@@ -124,10 +137,327 @@ class ProcessorLotReceipt(Document):
 		if not self.processor_lot:
 			frappe.throw(_("Processor Lot is required."))
 
+		if self._uses_v2_item_structure():
+			self._validate_v2_receipt_items()
+			self._validate_v2_weighment_links()
+			self._validate_v2_allocation_links()
+			self._validate_v2_document_flow_gate()
+			return
+
 		self._validate_weights()
 		self._validate_lot_allocations()
 		self._validate_processor_material_credit()
 		self._validate_linked_scr_consistency()
+
+	# ---------------------------------------------------------------------
+	# V2 itemized receipt compatibility boundary
+	# ---------------------------------------------------------------------
+
+	def _uses_v2_item_structure(self) -> bool:
+		"""Return whether this receipt uses the itemized V2 contract."""
+		return self.receipt_structure_version == V2_RECEIPT_STRUCTURE
+
+	def _validate_receipt_structure_immutability(self) -> None:
+		"""Prevent a saved legacy or V2 receipt changing data contracts."""
+		previous_doc = self.get_doc_before_save()
+		if not previous_doc:
+			return
+
+		if (
+			previous_doc.receipt_structure_version
+			!= self.receipt_structure_version
+		):
+			frappe.throw(
+				_("Receipt Structure Version cannot be changed after creation."),
+				title=_("Receipt Structure Is Locked"),
+			)
+
+		previous_keys_by_name = {
+			row.name: row.item_key
+			for row in previous_doc.receipt_items or []
+			if row.name
+		}
+		for row in self.receipt_items or []:
+			previous_key = previous_keys_by_name.get(row.name)
+			if previous_key and previous_key != row.item_key:
+				frappe.throw(
+					_("Receipt Item Key cannot be changed after creation."),
+					title=_("Receipt Item Key Is Locked"),
+				)
+
+	def _prepare_v2_receipt_items(self) -> None:
+		"""Assign stable item keys and controlled UOM values.
+
+		The hidden V2 tables are populated through controlled console tests in
+		this checkpoint. Browser exposure is deliberately deferred until FIFO
+		allocation and SCR mapping are item-aware.
+		"""
+		used_keys = set()
+		next_number = 1
+
+		for item in self.receipt_items or []:
+			if not item.item_key:
+				while f"ITEM-{next_number:03d}" in used_keys:
+					next_number += 1
+
+				item.item_key = f"ITEM-{next_number:03d}"
+				next_number += 1
+
+			if item.item_key in used_keys:
+				frappe.throw(
+					_("Receipt Item Key {0} occurs more than once.").format(
+						frappe.bold(item.item_key)
+					),
+					title=_("Duplicate Receipt Item Key"),
+				)
+
+			used_keys.add(item.item_key)
+
+			if not item.processed_item:
+				continue
+
+			stock_uom = frappe.db.get_value(
+				"Item",
+				item.processed_item,
+				"stock_uom",
+			)
+			if not stock_uom:
+				frappe.throw(
+					_("Receipt row {0}: Item {1} has no Stock UOM.").format(
+						item.idx,
+						frappe.bold(item.processed_item),
+					)
+				)
+
+			item.stock_uom = stock_uom
+			item.company_accepted_uom = stock_uom
+			item.supplier_invoice_uom = stock_uom
+
+	def _calculate_v2_item_commercial_reconciliation(self) -> None:
+		"""Calculate commercial variance independently for every item."""
+		for item in self.receipt_items or []:
+			accepted_qty = flt(
+				item.company_accepted_qty,
+				ITEM_QUANTITY_PRECISION,
+			)
+			invoice_qty = flt(
+				item.supplier_invoice_qty,
+				ITEM_QUANTITY_PRECISION,
+			)
+
+			if not invoice_qty:
+				item.supplier_invoice_vs_company_qty = 0.0
+				item.supplier_invoice_vs_company_percent = 0.0
+				continue
+
+			difference = flt(
+				invoice_qty - accepted_qty,
+				ITEM_QUANTITY_PRECISION,
+			)
+			item.supplier_invoice_vs_company_qty = difference
+			item.supplier_invoice_vs_company_percent = (
+				flt(
+					difference / accepted_qty * 100,
+					ITEM_QUANTITY_PRECISION,
+				)
+				if accepted_qty
+				else 0.0
+			)
+
+	def _sync_single_v2_item_to_legacy_header(self) -> None:
+		"""Maintain legacy summary fields only for a one-item V2 receipt.
+
+		A multi-item truck may mix UOMs, so its item quantities must never be
+		summed into the legacy header fields.
+		"""
+		items = list(self.receipt_items or [])
+
+		if len(items) != 1:
+			self.processed_item = None
+			self.stock_uom = None
+			self.measurement_method = None
+			self.company_accepted_qty = 0.0
+			self.company_accepted_uom = None
+			self.supplier_invoice_qty = 0.0
+			self.supplier_invoice_uom = None
+			self.supplier_invoice_vs_company_qty = 0.0
+			self.supplier_invoice_vs_company_percent = 0.0
+			self.lot_backed_qty = 0.0
+			self.processor_material_credit_qty = 0.0
+			self.material_credit_invoice_qty = 0.0
+			self.material_credit_status = "Not Applicable"
+			self.material_credit_stock_entry = None
+			self.allow_processor_material_credit = 0
+			self.material_credit_reason = None
+			return
+
+		item = items[0]
+		self.processed_item = item.processed_item
+		self.stock_uom = item.stock_uom
+		self.measurement_method = item.measurement_method
+		self.company_accepted_qty = item.company_accepted_qty
+		self.company_accepted_uom = item.company_accepted_uom
+		self.supplier_invoice_qty = item.supplier_invoice_qty
+		self.supplier_invoice_uom = item.supplier_invoice_uom
+		self.supplier_invoice_vs_company_qty = (
+			item.supplier_invoice_vs_company_qty
+		)
+		self.supplier_invoice_vs_company_percent = (
+			item.supplier_invoice_vs_company_percent
+		)
+		self.lot_backed_qty = item.lot_backed_qty
+		self.processor_material_credit_qty = (
+			item.processor_material_credit_qty
+		)
+		self.material_credit_invoice_qty = (
+			item.material_credit_invoice_qty
+		)
+		self.material_credit_status = item.material_credit_status
+		self.material_credit_stock_entry = item.material_credit_stock_entry
+		self.allow_processor_material_credit = (
+			item.allow_processor_material_credit
+		)
+		self.material_credit_reason = item.material_credit_reason
+
+	def _validate_v2_receipt_items(self) -> None:
+		"""Validate V2 item identity, quantity and measurement contracts."""
+		if not self.receipt_items:
+			frappe.throw(
+				_("At least one Receipt Item is required for a V2 receipt."),
+				title=_("Receipt Items Required"),
+			)
+
+		item_keys = set()
+		processed_items = set()
+
+		for item in self.receipt_items:
+			row_label = _("Receipt Item row {0}").format(item.idx)
+
+			if not item.item_key:
+				frappe.throw(_("{0}: Item Key is required.").format(row_label))
+
+			if item.item_key in item_keys:
+				frappe.throw(
+					_("{0}: duplicate Item Key {1}.").format(
+						row_label,
+						frappe.bold(item.item_key),
+					)
+				)
+			item_keys.add(item.item_key)
+
+			if item.processed_item in processed_items:
+				frappe.throw(
+					_("Processed Item {0} occurs more than once.").format(
+						frappe.bold(item.processed_item)
+					),
+					title=_("Duplicate Receipt Item"),
+				)
+			processed_items.add(item.processed_item)
+
+			if flt(item.company_accepted_qty) < 0:
+				frappe.throw(_("{0}: Company Accepted Qty cannot be negative.").format(row_label))
+
+			if flt(item.supplier_invoice_qty) < 0:
+				frappe.throw(_("{0}: Supplier Invoice Qty cannot be negative.").format(row_label))
+
+			allowed_bases = {
+				"Weight": {
+					"Truck Differential Weight",
+					"Separate Item Weight",
+					"Manual Verified Quantity",
+				},
+				"Count": {
+					"In-house Weigh Count",
+					"Direct Count",
+					"Manual Verified Quantity",
+				},
+			}
+			if item.measurement_basis not in allowed_bases.get(
+				item.measurement_method,
+				set(),
+			):
+				frappe.throw(
+					_("{0}: Measurement Basis {1} is not valid for {2}.").format(
+						row_label,
+						frappe.bold(item.measurement_basis),
+						frappe.bold(item.measurement_method),
+					),
+					title=_("Invalid Measurement Basis"),
+				)
+
+	def _validate_v2_weighment_links(self) -> None:
+		"""Validate item keys on staged V2 weighment rows.
+
+		Differential computation is intentionally deferred to the next
+		checkpoint, where its sequence rules can be introduced and tested as
+		one atomic change.
+		"""
+		items_by_key = {
+			item.item_key: item
+			for item in self.receipt_items or []
+		}
+
+		for row in self.item_weighments or []:
+			if flt(row.scale_weight) < 0:
+				frappe.throw(
+					_("Weighment row {0}: Scale Weight cannot be negative.").format(
+						row.idx
+					)
+				)
+
+			if not row.receipt_item_key:
+				row.processed_item = None
+				continue
+
+			item = items_by_key.get(row.receipt_item_key)
+			if not item:
+				frappe.throw(
+					_("Weighment row {0}: Receipt Item Key {1} does not exist.").format(
+						row.idx,
+						frappe.bold(row.receipt_item_key),
+					),
+					title=_("Invalid Weighment Item Link"),
+				)
+
+			row.processed_item = item.processed_item
+
+	def _validate_v2_allocation_links(self) -> None:
+		"""Require each staged allocation to identify its receipt item."""
+		items_by_key = {
+			item.item_key: item
+			for item in self.receipt_items or []
+		}
+
+		for row in self.lot_allocations or []:
+			item = items_by_key.get(row.receipt_item_key)
+			if not item:
+				frappe.throw(
+					_("Allocation row {0}: Receipt Item Key {1} does not exist.").format(
+						row.idx,
+						frappe.bold(row.receipt_item_key or _("blank")),
+					),
+					title=_("Invalid Allocation Item Link"),
+				)
+
+			if (
+				row.processed_item != item.processed_item
+				or row.stock_uom != item.stock_uom
+			):
+				frappe.throw(
+					_("Allocation row {0} does not match Receipt Item {1}.").format(
+						row.idx,
+						frappe.bold(item.item_key),
+					),
+					title=_("Allocation Item Mismatch"),
+				)
+
+	def _validate_v2_document_flow_gate(self) -> None:
+		"""Keep itemized receipts away from the still-single-item mapper."""
+		if self.subcontracting_receipt:
+			frappe.throw(
+				_("V2 itemized SCR validation is not enabled in this checkpoint."),
+				title=_("V2 Document Flow Not Enabled"),
+			)
 
 	def after_insert(self) -> None:
 		"""Refresh every Processor Lot represented by this receipt."""
@@ -1453,6 +1783,18 @@ def _validate_scr_creation(processor_lot_receipt) -> None:
 	if processor_lot_receipt.is_new():
 		frappe.throw(
 			_("Please save the Processor Lot Receipt first.")
+		)
+
+	if (
+		processor_lot_receipt.receipt_structure_version
+		== V2_RECEIPT_STRUCTURE
+	):
+		frappe.throw(
+			_(
+				"V2 itemized Subcontracting Receipt mapping is not enabled "
+				"in this checkpoint."
+			),
+			title=_("V2 Document Flow Not Enabled"),
 		)
 
 	if processor_lot_receipt.docstatus == 2:

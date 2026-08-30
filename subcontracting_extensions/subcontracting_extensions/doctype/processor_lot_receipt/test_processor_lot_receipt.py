@@ -15,6 +15,102 @@ from . import processor_lot_receipt as controller
 class TestProcessorLotReceipt(FrappeTestCase):
 	"""Regression coverage for controlled Processor Material Credit stock."""
 
+	def _v2_plr(self, items=None, allocations=None, weighments=None):
+		plr = frappe.get_doc({
+			"doctype": "Processor Lot Receipt",
+			"receipt_structure_version": controller.V2_RECEIPT_STRUCTURE,
+			"receipt_items": items or [],
+			"lot_allocations": allocations or [],
+			"item_weighments": weighments or [],
+		})
+		return plr
+
+	def test_legacy_receipt_does_not_enter_v2_path(self):
+		plr = frappe.get_doc({
+			"doctype": "Processor Lot Receipt",
+			"receipt_structure_version": controller.LEGACY_RECEIPT_STRUCTURE,
+		})
+		self.assertFalse(plr._uses_v2_item_structure())
+
+	def test_v2_commercial_reconciliation_is_item_specific(self):
+		plr = self._v2_plr(items=[
+			{
+				"item_key": "ITEM-001",
+				"processed_item": "ITEM-A",
+				"measurement_method": "Weight",
+				"measurement_basis": "Separate Item Weight",
+				"company_accepted_qty": 100.123456,
+				"supplier_invoice_qty": 101.123456,
+			},
+			{
+				"item_key": "ITEM-002",
+				"processed_item": "ITEM-B",
+				"measurement_method": "Count",
+				"measurement_basis": "Direct Count",
+				"company_accepted_qty": 20,
+				"supplier_invoice_qty": 18,
+			},
+		])
+
+		plr._calculate_v2_item_commercial_reconciliation()
+
+		self.assertEqual(
+			plr.receipt_items[0].supplier_invoice_vs_company_qty,
+			1,
+		)
+		self.assertEqual(
+			plr.receipt_items[1].supplier_invoice_vs_company_qty,
+			-2,
+		)
+
+	def test_multi_item_v2_does_not_aggregate_header_quantities(self):
+		plr = self._v2_plr(items=[
+			{
+				"item_key": "ITEM-001",
+				"processed_item": "ITEM-A",
+				"stock_uom": "Kg",
+				"measurement_method": "Weight",
+				"measurement_basis": "Separate Item Weight",
+				"company_accepted_qty": 100,
+			},
+			{
+				"item_key": "ITEM-002",
+				"processed_item": "ITEM-B",
+				"stock_uom": "Units",
+				"measurement_method": "Count",
+				"measurement_basis": "Direct Count",
+				"company_accepted_qty": 20,
+			},
+		])
+		plr.company_accepted_qty = 120
+
+		plr._sync_single_v2_item_to_legacy_header()
+
+		self.assertEqual(plr.company_accepted_qty, 0)
+		self.assertIsNone(plr.stock_uom)
+		self.assertIsNone(plr.processed_item)
+
+	def test_v2_allocation_requires_existing_item_key(self):
+		plr = self._v2_plr(
+			items=[{
+				"item_key": "ITEM-001",
+				"processed_item": "ITEM-A",
+				"stock_uom": "Kg",
+				"measurement_method": "Weight",
+				"measurement_basis": "Separate Item Weight",
+			}],
+			allocations=[{
+				"receipt_item_key": "ITEM-999",
+				"processed_item": "ITEM-A",
+				"stock_uom": "Kg",
+				"processor_lot": "LOT-A",
+				"allocated_accepted_qty": 1,
+			}],
+		)
+
+		with self.assertRaises(frappe.ValidationError):
+			plr._validate_v2_allocation_links()
+
 	def test_equivalent_posting_time_representations_match(self):
 		time_delta = timedelta(
 			seconds=36123,
