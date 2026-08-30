@@ -271,6 +271,7 @@ class TestProcessorLotReceipt(FrappeTestCase):
 		plr = SimpleNamespace(
 			name="PLR-TEST-CREDIT",
 			docstatus=0,
+			receipt_structure_version=controller.LEGACY_RECEIPT_STRUCTURE,
 			processor_material_credit_qty=160,
 			allow_processor_material_credit=1,
 			material_credit_reason="Supplier Supply Excess",
@@ -292,9 +293,9 @@ class TestProcessorLotReceipt(FrappeTestCase):
 			"has_permission",
 			return_value=True,
 		), patch.object(
-			controller.frappe.db,
-			"get_value",
-			return_value=None,
+			controller.frappe,
+			"get_all",
+			return_value=[],
 		):
 			result = controller.create_material_credit_record(plr.name)
 
@@ -311,6 +312,7 @@ class TestProcessorLotReceipt(FrappeTestCase):
 		plr = SimpleNamespace(
 			name="PLR-TEST-CREDIT",
 			docstatus=0,
+			receipt_structure_version=controller.LEGACY_RECEIPT_STRUCTURE,
 			processor_material_credit_qty=160,
 			allow_processor_material_credit=1,
 			material_credit_reason="Supplier Supply Excess",
@@ -318,6 +320,7 @@ class TestProcessorLotReceipt(FrappeTestCase):
 		existing = SimpleNamespace(
 			name="PMA-EXISTING",
 			docstatus=0,
+			receipt_item_key=None,
 		)
 
 		with patch.object(
@@ -329,14 +332,60 @@ class TestProcessorLotReceipt(FrappeTestCase):
 			"has_permission",
 			return_value=True,
 		), patch.object(
-			controller.frappe.db,
-			"get_value",
-			return_value=existing,
+			controller.frappe,
+			"get_all",
+			return_value=[existing],
 		):
 			result = controller.create_material_credit_record(plr.name)
 
 		self.assertEqual(result["name"], "PMA-EXISTING")
 		self.assertFalse(result["created"])
+
+	def test_create_material_credit_record_keys_v2_item(self):
+		plr = frappe._dict(
+			name="PLR-TEST-V2",
+			docstatus=0,
+			receipt_structure_version=controller.V2_RECEIPT_STRUCTURE,
+			physical_receipt_date=date(2026, 8, 30),
+			receipt_items=[
+				frappe._dict(
+					item_key="ITEM-001",
+					processor_material_credit_qty=12.123456,
+					allow_processor_material_credit=1,
+					material_credit_reason="Item-specific excess",
+				),
+			],
+		)
+		entry = SimpleNamespace(
+			doctype="Processor Material Account Entry",
+			name="PMA-TEST-V2",
+			docstatus=0,
+			insert=lambda: None,
+		)
+
+		with patch.object(
+			controller.frappe,
+			"get_doc",
+			side_effect=[plr, entry],
+		) as get_doc, patch.object(
+			controller.frappe,
+			"has_permission",
+			return_value=True,
+		), patch.object(
+			controller.frappe,
+			"get_all",
+			return_value=[],
+		):
+			result = controller.create_material_credit_record(
+				plr.name,
+				"ITEM-001",
+			)
+
+		entry_values = get_doc.call_args_list[1].args[0]
+		self.assertEqual(entry_values["receipt_item_key"], "ITEM-001")
+		self.assertEqual(entry_values["processed_qty"], 12.123456)
+		self.assertEqual(entry_values["account_qty"], 12.123456)
+		self.assertEqual(result["receipt_item_key"], "ITEM-001")
 
 	def test_valuation_rate_accepts_sub_paise_rounding(self):
 		self.assertTrue(

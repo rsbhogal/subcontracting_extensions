@@ -45,6 +45,33 @@ def _calculate_material_credit_invoice_qty(
 	)
 
 
+def _get_material_credit_source(plr, receipt_item_key: str | None = None):
+	"""Return the authoritative legacy header or exact V2 credit item."""
+	if plr.receipt_structure_version != V2_RECEIPT_STRUCTURE:
+		if receipt_item_key:
+			frappe.throw(
+				_("Legacy Processor Lot Receipts cannot use a Receipt Item Key.")
+			)
+		return plr, None, 3
+
+	if not receipt_item_key:
+		frappe.throw(_("Receipt Item Key is required for a V2 material credit."))
+
+	matches = [
+		item
+		for item in plr.get("receipt_items", [])
+		if item.item_key == receipt_item_key
+	]
+	if len(matches) != 1:
+		frappe.throw(
+			_("Processor Lot Receipt {0} must contain exactly one Receipt Item {1}.").format(
+				frappe.bold(plr.name),
+				frappe.bold(receipt_item_key),
+			)
+		)
+	return matches[0], receipt_item_key, ITEM_QUANTITY_PRECISION
+
+
 def _posting_time_microseconds(value) -> int | None:
 	"""Normalize Frappe Time values without losing microseconds."""
 	if value is None:
@@ -1990,8 +2017,9 @@ class ProcessorLotReceipt(Document):
 @frappe.whitelist()
 def create_material_credit_record(
 	processor_lot_receipt: str,
+	receipt_item_key: str | None = None,
 ) -> dict:
-	"""Create one reviewable Draft Advance Credit PMA from a PLR excess."""
+	"""Create one reviewable Draft Advance Credit PMA from a credit source."""
 	plr = frappe.get_doc(
 		"Processor Lot Receipt",
 		processor_lot_receipt,
@@ -2009,28 +2037,42 @@ def create_material_credit_record(
 			)
 		)
 
-	credit_qty = flt(plr.processor_material_credit_qty, 3)
+	credit_source, receipt_item_key, precision = _get_material_credit_source(
+		plr,
+		receipt_item_key,
+	)
+	credit_qty = flt(
+		credit_source.processor_material_credit_qty,
+		precision,
+	)
 	if credit_qty <= 0:
 		frappe.throw(
 			_("Processor Lot Receipt {0} has no material credit to record.").format(
 				frappe.bold(plr.name)
 			)
 		)
-	if not plr.allow_processor_material_credit:
+	if not credit_source.allow_processor_material_credit:
 		frappe.throw(_("Processor Material Credit approval is required."))
-	if not (plr.material_credit_reason or "").strip():
+	if not (credit_source.material_credit_reason or "").strip():
 		frappe.throw(_("Processor Material Credit Reason is required."))
 
-	existing = frappe.db.get_value(
+	existing_rows = frappe.get_all(
 		"Processor Material Account Entry",
-		{
+		filters={
 			"entry_type": "Advance Credit",
 			"source_event": "PLR Excess",
 			"processor_lot_receipt": plr.name,
 			"docstatus": ["!=", 2],
 		},
-		["name", "docstatus"],
-		as_dict=True,
+		fields=["name", "docstatus", "receipt_item_key"],
+	)
+	existing = next(
+		(
+			row
+			for row in existing_rows
+			if (row.receipt_item_key or "") == (receipt_item_key or "")
+		),
+		None,
 	)
 	if existing:
 		return {
@@ -2038,6 +2080,7 @@ def create_material_credit_record(
 			"name": existing.name,
 			"docstatus": existing.docstatus,
 			"created": False,
+			"receipt_item_key": receipt_item_key,
 		}
 
 	entry = frappe.get_doc(
@@ -2047,9 +2090,10 @@ def create_material_credit_record(
 			"entry_type": "Advance Credit",
 			"source_event": "PLR Excess",
 			"processor_lot_receipt": plr.name,
+			"receipt_item_key": receipt_item_key,
 			"processed_qty": credit_qty,
 			"account_qty": credit_qty,
-			"remarks": plr.material_credit_reason,
+			"remarks": credit_source.material_credit_reason,
 		}
 	)
 	entry.insert()
@@ -2059,6 +2103,7 @@ def create_material_credit_record(
 		"name": entry.name,
 		"docstatus": entry.docstatus,
 		"created": True,
+		"receipt_item_key": receipt_item_key,
 	}
 
 

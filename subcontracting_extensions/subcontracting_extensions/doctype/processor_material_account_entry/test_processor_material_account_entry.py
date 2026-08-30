@@ -27,6 +27,50 @@ class TestProcessorMaterialAccountEntry(FrappeTestCase):
 			"Fully Applied",
 		)
 
+	def test_v2_credit_anchor_is_last_positive_item_allocation(self):
+		plr = frappe._dict(
+			name="PLR-TEST-V2",
+			receipt_structure_version=controller.V2_RECEIPT_STRUCTURE,
+			receipt_items=[
+				frappe._dict(item_key="ITEM-001"),
+			],
+			lot_allocations=[
+				frappe._dict(
+					receipt_item_key="ITEM-001",
+					processor_lot="PL-001",
+					subcontracting_order="SCO-001",
+					allocated_accepted_qty=5,
+				),
+				frappe._dict(
+					receipt_item_key="ITEM-001",
+					processor_lot="PL-002",
+					subcontracting_order="SCO-002",
+					allocated_accepted_qty=7,
+				),
+			],
+		)
+
+		anchor = controller._get_v2_credit_anchor(plr, "ITEM-001")
+
+		self.assertEqual(anchor.processor_lot, "PL-002")
+		self.assertEqual(anchor.subcontracting_order, "SCO-002")
+
+	def test_v2_credit_requires_positive_backed_allocation(self):
+		plr = frappe._dict(
+			name="PLR-TEST-V2",
+			receipt_structure_version=controller.V2_RECEIPT_STRUCTURE,
+			receipt_items=[
+				frappe._dict(item_key="ITEM-001"),
+			],
+			lot_allocations=[],
+		)
+
+		with self.assertRaisesRegex(
+			frappe.ValidationError,
+			"requires a positive Lot Allocation",
+		):
+			controller._get_v2_credit_anchor(plr, "ITEM-001")
+
 	def _entry(self):
 		return SimpleNamespace(
 			name="PMA-TEST-CREDIT",

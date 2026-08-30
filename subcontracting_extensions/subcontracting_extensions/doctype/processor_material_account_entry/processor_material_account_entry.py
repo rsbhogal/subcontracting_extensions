@@ -17,6 +17,51 @@ DIRECTION_BY_ENTRY_TYPE = {
 	"Commercial Settlement": "Debit",
 }
 
+V2_RECEIPT_STRUCTURE = "V2 Itemized"
+ITEM_QUANTITY_PRECISION = 6
+
+
+def _get_v2_receipt_item(plr, receipt_item_key: str):
+	"""Return the exact V2 receipt item identified by its stable key."""
+	if plr.receipt_structure_version != V2_RECEIPT_STRUCTURE:
+		frappe.throw(
+			_("Receipt Item Key is valid only for a V2 Itemized receipt.")
+		)
+	if not receipt_item_key:
+		frappe.throw(_("Receipt Item Key is required for a V2 material credit."))
+
+	matches = [
+		row
+		for row in plr.get("receipt_items", [])
+		if row.item_key == receipt_item_key
+	]
+	if len(matches) != 1:
+		frappe.throw(
+			_("Processor Lot Receipt {0} must contain exactly one Receipt Item {1}.").format(
+				frappe.bold(plr.name),
+				frappe.bold(receipt_item_key),
+			)
+		)
+	return matches[0]
+
+
+def _get_v2_credit_anchor(plr, receipt_item_key: str):
+	"""Return the last positive allocation which backs one V2 receipt item."""
+	_get_v2_receipt_item(plr, receipt_item_key)
+	allocations = [
+		row
+		for row in plr.get("lot_allocations", [])
+		if row.receipt_item_key == receipt_item_key
+		and flt(row.allocated_accepted_qty, ITEM_QUANTITY_PRECISION) > 0
+	]
+	if not allocations:
+		frappe.throw(
+			_("Receipt Item {0} requires a positive Lot Allocation before its material credit can be recorded.").format(
+				frappe.bold(receipt_item_key)
+			)
+		)
+	return allocations[-1]
+
 
 def _get_material_credit_status(
 	source_qty: float,
@@ -170,9 +215,19 @@ class ProcessorMaterialAccountEntry(Document):
 		)
 		active_documents = []
 
+		receipt_item_key = getattr(self, "receipt_item_key", None)
+		item = (
+			_get_v2_receipt_item(plr, receipt_item_key)
+			if receipt_item_key
+			else None
+		)
 		stock_entry = (
 			self.material_credit_stock_entry
-			or getattr(plr, "material_credit_stock_entry", None)
+			or (
+				item.material_credit_stock_entry
+				if item
+				else getattr(plr, "material_credit_stock_entry", None)
+			)
 		)
 		if stock_entry:
 			stock_entry_status = frappe.db.get_value(
@@ -264,6 +319,32 @@ class ProcessorMaterialAccountEntry(Document):
 				)
 			)
 
+		if self.receipt_item_key:
+			item_name = frappe.db.get_value(
+				"Processor Lot Receipt Item",
+				{
+					"parent": self.processor_lot_receipt,
+					"parenttype": "Processor Lot Receipt",
+					"item_key": self.receipt_item_key,
+				},
+				"name",
+			)
+			if not item_name:
+				frappe.throw(
+					_("Receipt Item {0} does not exist on Processor Lot Receipt {1}.").format(
+						frappe.bold(self.receipt_item_key),
+						frappe.bold(self.processor_lot_receipt),
+					)
+				)
+			frappe.db.set_value(
+				"Processor Lot Receipt Item",
+				item_name,
+				"material_credit_status",
+				status,
+				update_modified=False,
+			)
+			return
+
 		frappe.db.set_value(
 			"Processor Lot Receipt",
 			self.processor_lot_receipt,
@@ -285,8 +366,17 @@ class ProcessorMaterialAccountEntry(Document):
 						frappe.bold(plr.name)
 					)
 				)
-			self.processor_lot = plr.processor_lot
-			self.subcontracting_order = plr.subcontracting_order
+			if plr.receipt_structure_version == V2_RECEIPT_STRUCTURE:
+				anchor = _get_v2_credit_anchor(plr, self.receipt_item_key)
+				self.processor_lot = anchor.processor_lot
+				self.subcontracting_order = anchor.subcontracting_order
+			else:
+				if self.receipt_item_key:
+					frappe.throw(
+						_("Legacy Processor Lot Receipts cannot use a Receipt Item Key.")
+					)
+				self.processor_lot = plr.processor_lot
+				self.subcontracting_order = plr.subcontracting_order
 
 		if self.processor_lot:
 			lot = frappe.get_doc("Processor Lot", self.processor_lot)
@@ -490,20 +580,27 @@ class ProcessorMaterialAccountEntry(Document):
 
 	def _validate_lineage(self) -> None:
 		if self.processor_lot_receipt:
-			values = frappe.db.get_value(
+			plr = frappe.get_doc(
 				"Processor Lot Receipt",
 				self.processor_lot_receipt,
-				["processor_lot", "subcontracting_order"],
-				as_dict=True,
 			)
-			if (
-				not values
-				or values.processor_lot != self.processor_lot
-				or values.subcontracting_order != self.subcontracting_order
-			):
-				frappe.throw(
-					_("Processor Lot Receipt lineage is inconsistent.")
-				)
+			if plr.receipt_structure_version == V2_RECEIPT_STRUCTURE:
+				anchor = _get_v2_credit_anchor(plr, self.receipt_item_key)
+				if (
+					anchor.processor_lot != self.processor_lot
+					or anchor.subcontracting_order != self.subcontracting_order
+				):
+					frappe.throw(
+						_("V2 Receipt Item allocation lineage is inconsistent.")
+					)
+			else:
+				if (
+					plr.processor_lot != self.processor_lot
+					or plr.subcontracting_order != self.subcontracting_order
+				):
+					frappe.throw(
+						_("Processor Lot Receipt lineage is inconsistent.")
+					)
 
 		if self.processor_lot:
 			lot_sco = frappe.db.get_value(
@@ -534,19 +631,34 @@ class ProcessorMaterialAccountEntry(Document):
 		if not self.is_new():
 			filters["name"] = ["!=", self.name]
 
-		existing = frappe.db.get_value(
+		existing_rows = frappe.get_all(
 			"Processor Material Account Entry",
 			filters,
-			"name",
+			["name", "receipt_item_key"],
+		)
+		existing = next(
+			(
+				row.name
+				for row in existing_rows
+				if (row.receipt_item_key or "") == (self.receipt_item_key or "")
+			),
+			None,
 		)
 		if existing:
 			frappe.throw(
 				_(
 					"Processor Material Account Entry {0} already records "
-					"the excess from Processor Lot Receipt {1}."
+					"the excess from Processor Lot Receipt {1}{2}."
 				).format(
 					frappe.bold(existing),
 					frappe.bold(self.processor_lot_receipt),
+					(
+						_(" Receipt Item {0}").format(
+							frappe.bold(self.receipt_item_key)
+						)
+						if self.receipt_item_key
+						else ""
+					),
 				)
 			)
 
@@ -570,7 +682,12 @@ class ProcessorMaterialAccountEntry(Document):
 				)
 			)
 
-		if not plr.allow_processor_material_credit:
+		item = (
+			_get_v2_receipt_item(plr, self.receipt_item_key)
+			if plr.receipt_structure_version == V2_RECEIPT_STRUCTURE
+			else plr
+		)
+		if not item.allow_processor_material_credit:
 			frappe.throw(
 				_(
 					"Processor Lot Receipt {0} has not authorised a "
@@ -578,19 +695,19 @@ class ProcessorMaterialAccountEntry(Document):
 				).format(frappe.bold(plr.name))
 			)
 
-		if plr.material_credit_status != "Proposed":
+		if item.material_credit_status != "Proposed":
 			frappe.throw(
 				_(
 					"Processor Lot Receipt {0} must have Material Credit "
 					"Status Proposed; its current status is {1}."
 				).format(
 					frappe.bold(plr.name),
-					frappe.bold(plr.material_credit_status or _("Not Set")),
+					frappe.bold(item.material_credit_status or _("Not Set")),
 				)
 			)
 
 		credit_qty = flt(
-			plr.processor_material_credit_qty,
+			item.processor_material_credit_qty,
 			self.precision("account_qty"),
 		)
 		processed_qty = flt(
@@ -602,7 +719,7 @@ class ProcessorMaterialAccountEntry(Document):
 			self.precision("account_qty"),
 		)
 		expected_commercial_qty = flt(
-			plr.material_credit_invoice_qty,
+			item.material_credit_invoice_qty,
 			self.precision("commercial_qty"),
 		)
 		if self.is_new():
@@ -614,7 +731,7 @@ class ProcessorMaterialAccountEntry(Document):
 					"Lot Receipt credit invoice quantity of {0} {1}."
 				).format(
 					frappe.bold(expected_commercial_qty),
-					frappe.bold(plr.stock_uom),
+					frappe.bold(item.stock_uom),
 				)
 			)
 
@@ -633,14 +750,14 @@ class ProcessorMaterialAccountEntry(Document):
 					"source Processor Lot Receipt credit of {0} {1}."
 				).format(
 					frappe.bold(credit_qty),
-					frappe.bold(plr.stock_uom),
+					frappe.bold(item.stock_uom),
 				),
 				title=_("PLR Credit Quantity Mismatch"),
 			)
 
 		if (
-			self.processed_item != plr.processed_item
-			or self.processed_item_uom != plr.stock_uom
+			self.processed_item != item.processed_item
+			or self.processed_item_uom != item.stock_uom
 		):
 			frappe.throw(
 				_(
@@ -830,16 +947,16 @@ class ProcessorMaterialAccountEntry(Document):
 			flt(source.account_qty),
 			applied_qty,
 		)
-		frappe.db.set_value(
-			"Processor Lot Receipt",
-			source.processor_lot_receipt,
-			"material_credit_status",
-			status,
-			update_modified=False,
-		)
+		source._set_plr_material_credit_status(status)
 
 	def _validate_system_fields(self) -> None:
 		previous_doc = self.get_doc_before_save()
+		if (
+			previous_doc
+			and (self.receipt_item_key or "")
+			!= (previous_doc.receipt_item_key or "")
+		):
+			frappe.throw(_("Receipt Item Key is maintained by the system."))
 		if previous_doc and self.is_reversed != previous_doc.is_reversed:
 			frappe.throw(_("Is Reversed is maintained by the system."))
 		if (
