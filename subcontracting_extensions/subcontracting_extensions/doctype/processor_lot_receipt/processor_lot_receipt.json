@@ -51,6 +51,11 @@
   "column_break_quantity_reconciliation",
   "stock_uom",
   "remarks",
+  "receipt_structure_version",
+  "v2_receipt_items_section",
+  "receipt_items",
+  "v2_weighments_section",
+  "item_weighments",
   "processor_lot_allocations_section",
   "lot_allocations",
   "processor_material_credit_section",
@@ -144,6 +149,40 @@
    "fieldname": "remarks",
    "fieldtype": "Small Text",
    "label": "Remarks"
+  },
+  {
+   "fieldname": "receipt_structure_version",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Receipt Structure Version",
+   "options": "\nLegacy Single Item\nV2 Itemized",
+   "read_only": 1
+  },
+  {
+   "fieldname": "v2_receipt_items_section",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "Receipt Items"
+  },
+  {
+   "fieldname": "receipt_items",
+   "fieldtype": "Table",
+   "hidden": 1,
+   "label": "Receipt Items",
+   "options": "Processor Lot Receipt Item"
+  },
+  {
+   "fieldname": "v2_weighments_section",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "Item Weighments"
+  },
+  {
+   "fieldname": "item_weighments",
+   "fieldtype": "Table",
+   "hidden": 1,
+   "label": "Item Weighments",
+   "options": "Processor Lot Receipt Weighment"
   },
   {
    "fieldname": "lot_allocations",

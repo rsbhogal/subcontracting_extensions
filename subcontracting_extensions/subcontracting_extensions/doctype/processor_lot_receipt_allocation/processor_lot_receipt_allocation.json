@@ -7,9 +7,12 @@
  "engine": "InnoDB",
  "field_order": [
   "section_break_2ar9",
+  "receipt_item_key",
   "processor_lot",
   "subcontracting_order",
+  "subcontracting_order_item",
   "purchase_order",
+  "purchase_order_item",
   "lot_date",
   "processed_item",
   "stock_uom",
@@ -29,6 +32,13 @@
    "label": "Allocation Details"
   },
   {
+   "fieldname": "receipt_item_key",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Receipt Item Key",
+   "read_only": 1
+  },
+  {
    "fieldname": "processor_lot",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -46,10 +56,24 @@
    "read_only": 1
   },
   {
+   "fieldname": "subcontracting_order_item",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Subcontracting Order Item",
+   "read_only": 1
+  },
+  {
    "fieldname": "purchase_order",
    "fieldtype": "Link",
    "label": "Purchase Order",
    "options": "Purchase Order",
+   "read_only": 1
+  },
+  {
+   "fieldname": "purchase_order_item",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Purchase Order Item",
    "read_only": 1
   },
   {

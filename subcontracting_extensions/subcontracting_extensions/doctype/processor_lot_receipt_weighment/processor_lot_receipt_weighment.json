@@ -1,0 +1,151 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-30 10:30:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "reading_section",
+  "weighment_stage",
+  "weighment_date",
+  "weighment_time",
+  "weighbridge",
+  "slip_number",
+  "scale_weight",
+  "measurement_uom",
+  "item_section",
+  "receipt_item_key",
+  "processed_item",
+  "derived_unloaded_qty",
+  "adjustment_qty",
+  "accepted_qty",
+  "adjustment_reason",
+  "remarks"
+ ],
+ "fields": [
+  {
+   "fieldname": "reading_section",
+   "fieldtype": "Section Break",
+   "label": "Scale Reading"
+  },
+  {
+   "fieldname": "weighment_stage",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Weighment Stage",
+   "options": "\nArrival Loaded\nAfter Unloading\nFinal Tare\nOther",
+   "reqd": 1
+  },
+  {
+   "fieldname": "weighment_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Weighment Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "weighment_time",
+   "fieldtype": "Time",
+   "label": "Weighment Time"
+  },
+  {
+   "fieldname": "weighbridge",
+   "fieldtype": "Data",
+   "label": "Weighbridge"
+  },
+  {
+   "fieldname": "slip_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Slip Number"
+  },
+  {
+   "columns": 2,
+   "fieldname": "scale_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Scale Weight",
+   "non_negative": 1,
+   "precision": "3",
+   "reqd": 1
+  },
+  {
+   "default": "Kg",
+   "fieldname": "measurement_uom",
+   "fieldtype": "Link",
+   "label": "Measurement UOM",
+   "options": "UOM",
+   "reqd": 1
+  },
+  {
+   "fieldname": "item_section",
+   "fieldtype": "Section Break",
+   "label": "Unloaded Item"
+  },
+  {
+   "fieldname": "receipt_item_key",
+   "fieldtype": "Data",
+   "label": "Receipt Item Key",
+   "read_only": 1
+  },
+  {
+   "fieldname": "processed_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Processed Item",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "derived_unloaded_qty",
+   "fieldtype": "Float",
+   "label": "Derived Unloaded Qty",
+   "non_negative": 1,
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "adjustment_qty",
+   "fieldtype": "Float",
+   "label": "Adjustment Qty",
+   "precision": "3"
+  },
+  {
+   "columns": 2,
+   "fieldname": "accepted_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Accepted Qty",
+   "non_negative": 1,
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.adjustment_qty != 0",
+   "fieldname": "adjustment_reason",
+   "fieldtype": "Small Text",
+   "label": "Adjustment Reason",
+   "mandatory_depends_on": "eval:doc.adjustment_qty != 0"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-30 10:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Extensions",
+ "name": "Processor Lot Receipt Weighment",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

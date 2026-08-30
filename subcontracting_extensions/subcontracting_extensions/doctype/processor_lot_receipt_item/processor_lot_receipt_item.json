@@ -1,0 +1,237 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-30 10:30:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "identity_section",
+  "item_key",
+  "processed_item",
+  "stock_uom",
+  "legacy_direct_attribution",
+  "measurement_section",
+  "measurement_method",
+  "measurement_basis",
+  "column_break_measurement",
+  "company_accepted_qty",
+  "company_accepted_uom",
+  "commercial_section",
+  "supplier_invoice_qty",
+  "supplier_invoice_uom",
+  "column_break_commercial",
+  "supplier_invoice_vs_company_qty",
+  "supplier_invoice_vs_company_percent",
+  "lot_backing_section",
+  "lot_backed_qty",
+  "processor_material_credit_qty",
+  "material_credit_invoice_qty",
+  "material_credit_status",
+  "material_credit_stock_entry",
+  "column_break_material_credit",
+  "allow_processor_material_credit",
+  "material_credit_reason",
+  "remarks"
+ ],
+ "fields": [
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break",
+   "label": "Receipt Item"
+  },
+  {
+   "fieldname": "item_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Item Key",
+   "read_only": 1
+  },
+  {
+   "columns": 3,
+   "fieldname": "processed_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Processed Item",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "stock_uom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Stock UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "legacy_direct_attribution",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Legacy Direct Attribution",
+   "read_only": 1
+  },
+  {
+   "fieldname": "measurement_section",
+   "fieldtype": "Section Break",
+   "label": "Accepted Quantity"
+  },
+  {
+   "fieldname": "measurement_method",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Measurement Method",
+   "options": "\nWeight\nCount",
+   "reqd": 1
+  },
+  {
+   "fieldname": "measurement_basis",
+   "fieldtype": "Select",
+   "label": "Measurement Basis",
+   "options": "\nTruck Differential Weight\nSeparate Item Weight\nIn-house Weigh Count\nDirect Count\nManual Verified Quantity",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_measurement",
+   "fieldtype": "Column Break"
+  },
+  {
+   "columns": 2,
+   "fieldname": "company_accepted_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Company Accepted Qty",
+   "non_negative": 1,
+   "precision": "6"
+  },
+  {
+   "fieldname": "company_accepted_uom",
+   "fieldtype": "Link",
+   "label": "Company Accepted UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "commercial_section",
+   "fieldtype": "Section Break",
+   "label": "Commercial Reconciliation"
+  },
+  {
+   "columns": 2,
+   "fieldname": "supplier_invoice_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Supplier Invoice Qty",
+   "non_negative": 1,
+   "precision": "6"
+  },
+  {
+   "fieldname": "supplier_invoice_uom",
+   "fieldtype": "Link",
+   "label": "Supplier Invoice UOM",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_commercial",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "supplier_invoice_vs_company_qty",
+   "fieldtype": "Float",
+   "label": "Supplier Invoice Vs Company Qty",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "supplier_invoice_vs_company_percent",
+   "fieldtype": "Percent",
+   "label": "Supplier Invoice Vs Company %",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lot_backing_section",
+   "fieldtype": "Section Break",
+   "label": "Lot Backing and Material Credit"
+  },
+  {
+   "fieldname": "lot_backed_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Lot Backed Qty",
+   "non_negative": 1,
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "processor_material_credit_qty",
+   "fieldtype": "Float",
+   "label": "Processor Material Credit Qty",
+   "non_negative": 1,
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "material_credit_invoice_qty",
+   "fieldtype": "Float",
+   "label": "Material Credit Invoice Qty",
+   "non_negative": 1,
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "material_credit_status",
+   "fieldtype": "Select",
+   "label": "Material Credit Status",
+   "options": "\nNot Applicable\nProposed\nRecorded\nPartly Applied\nFully Applied\nCommercially Settled\nReversed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "material_credit_stock_entry",
+   "fieldtype": "Link",
+   "label": "Material Credit Stock Entry",
+   "no_copy": 1,
+   "options": "Stock Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_material_credit",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Permit this item's accepted quantity exceeding compatible Processor Lot balances to be recorded as a controlled Processor Material Credit.",
+   "fieldname": "allow_processor_material_credit",
+   "fieldtype": "Check",
+   "label": "Allow Processor Material Credit"
+  },
+  {
+   "depends_on": "allow_processor_material_credit",
+   "fieldname": "material_credit_reason",
+   "fieldtype": "Small Text",
+   "label": "Material Credit Reason",
+   "mandatory_depends_on": "allow_processor_material_credit"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-30 10:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Extensions",
+ "name": "Processor Lot Receipt Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
