@@ -154,6 +154,75 @@ def after_insert(doc, method=None):
 		doc.name,
 	)
 
+	_link_v2_allocations_to_scr_items(
+		doc,
+		processor_lot_receipt.name,
+	)
+
+
+def _link_v2_allocations_to_scr_items(doc, processor_lot_receipt):
+	"""Persist exact SCR Item links on V2 allocation rows."""
+	structure_version = frappe.db.get_value(
+		"Processor Lot Receipt",
+		processor_lot_receipt,
+		"receipt_structure_version",
+	)
+	if structure_version != "V2 Itemized":
+		return
+
+	allocations = frappe.get_all(
+		"Processor Lot Receipt Allocation",
+		filters={
+			"parent": processor_lot_receipt,
+			"parenttype": "Processor Lot Receipt",
+			"parentfield": "lot_allocations",
+		},
+		fields=[
+			"name",
+			"idx",
+			"subcontracting_order_item",
+			"purchase_order_item",
+		],
+		order_by="idx asc",
+	)
+	scr_items_by_lineage = {}
+	for item in doc.items:
+		key = (
+			item.subcontracting_order_item,
+			item.purchase_order_item,
+		)
+		if key in scr_items_by_lineage:
+			frappe.throw(
+				_("SCR contains duplicate order-item lineage {0} / {1}.").format(
+					frappe.bold(key[0]),
+					frappe.bold(key[1]),
+				),
+				title=_("Ambiguous SCR Item Lineage"),
+			)
+		scr_items_by_lineage[key] = item
+
+	for allocation in allocations:
+		key = (
+			allocation.subcontracting_order_item,
+			allocation.purchase_order_item,
+		)
+		scr_item = scr_items_by_lineage.get(key)
+		if not scr_item:
+			frappe.throw(
+				_("Allocation row {0} has no matching SCR Item.").format(
+					allocation.idx
+				),
+				title=_("SCR Item Link Missing"),
+			)
+
+		frappe.db.set_value(
+			"Processor Lot Receipt Allocation",
+			allocation.name,
+			"subcontracting_receipt_item",
+			scr_item.name,
+			update_modified=False,
+		)
+
 
 def on_trash(doc, method=None):
 	"""
@@ -173,6 +242,18 @@ def on_trash(doc, method=None):
 
 	if linked_scr != doc.name:
 		return
+
+	frappe.db.set_value(
+		"Processor Lot Receipt Allocation",
+		{
+			"parent": doc.custom_processor_lot_receipt,
+			"parenttype": "Processor Lot Receipt",
+			"parentfield": "lot_allocations",
+		},
+		"subcontracting_receipt_item",
+		None,
+		update_modified=False,
+	)
 
 	frappe.db.set_value(
 		"Processor Lot Receipt",

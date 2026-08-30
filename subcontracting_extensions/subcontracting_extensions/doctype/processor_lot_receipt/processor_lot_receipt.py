@@ -145,7 +145,7 @@ class ProcessorLotReceipt(Document):
 			self._validate_v2_weighments()
 			self._validate_v2_allocations()
 			self._validate_v2_material_credit()
-			self._validate_v2_document_flow_gate()
+			self._validate_v2_linked_scr_consistency()
 			return
 
 		self._validate_weights()
@@ -483,8 +483,20 @@ class ProcessorLotReceipt(Document):
 
 			sco_item = matching_rows[0]
 			lot_order_qty = flt(sco_item.qty, ITEM_QUANTITY_PRECISION)
-			previously_received_qty = self._get_lot_allocated_accepted_qty(
+			allocated_received_qty = self._get_lot_allocated_accepted_qty(
 				processor_lot.name
+			)
+			native_received_qty = flt(
+				max(
+					flt(sco_item.received_qty)
+					- flt(sco_item.returned_qty),
+					0.0,
+				),
+				ITEM_QUANTITY_PRECISION,
+			)
+			previously_received_qty = max(
+				allocated_received_qty,
+				native_received_qty,
 			)
 			credit_applied_qty = self._get_lot_submitted_credit_applied_qty_for_item(
 				processor_lot.name,
@@ -944,13 +956,67 @@ class ProcessorLotReceipt(Document):
 					title=_("Material Credit Reason Required"),
 				)
 
-	def _validate_v2_document_flow_gate(self) -> None:
-		"""Keep itemized receipts away from the still-single-item mapper."""
-		if self.subcontracting_receipt:
+	def _validate_v2_linked_scr_consistency(self) -> None:
+		"""Validate active SCR rows against exact V2 allocation lineage."""
+		if not self.subcontracting_receipt:
+			return
+
+		scr = frappe.get_doc(
+			"Subcontracting Receipt",
+			self.subcontracting_receipt,
+		)
+		if scr.docstatus == 2:
+			return
+		if scr.custom_processor_lot_receipt != self.name:
 			frappe.throw(
-				_("V2 itemized SCR validation is not enabled in this checkpoint."),
-				title=_("V2 Document Flow Not Enabled"),
+				_("Subcontracting Receipt {0} is not linked back to this receipt.").format(
+					frappe.bold(scr.name)
+				),
+				title=_("Subcontracting Receipt Link Mismatch"),
 			)
+
+		scr_items_by_name = {
+			row.name: row
+			for row in scr.items
+		}
+		for allocation in self.lot_allocations or []:
+			scr_item = scr_items_by_name.get(
+				allocation.subcontracting_receipt_item
+			)
+			if not scr_item:
+				frappe.throw(
+					_("Allocation row {0} is not linked to an SCR Item.").format(
+						allocation.idx
+					),
+					title=_("SCR Item Link Missing"),
+				)
+
+			if (
+				scr_item.subcontracting_order_item
+				!= allocation.subcontracting_order_item
+				or scr_item.purchase_order_item
+				!= allocation.purchase_order_item
+			):
+				frappe.throw(
+					_("Allocation row {0} and SCR Item {1} have different lineage.").format(
+						allocation.idx,
+						frappe.bold(scr_item.name),
+					),
+					title=_("SCR Item Lineage Mismatch"),
+				)
+
+			if (
+				scr.docstatus == 1
+				and flt(scr_item.qty, ITEM_QUANTITY_PRECISION)
+				!= flt(allocation.allocated_accepted_qty, ITEM_QUANTITY_PRECISION)
+			):
+				frappe.throw(
+					_("Allocation row {0} quantity does not match submitted SCR Item {1}.").format(
+						allocation.idx,
+						frappe.bold(scr_item.name),
+					),
+					title=_("PLR and Submitted SCR Quantity Mismatch"),
+				)
 
 	def after_insert(self) -> None:
 		"""Refresh every Processor Lot represented by this receipt."""
@@ -1679,8 +1745,22 @@ class ProcessorLotReceipt(Document):
 			lot_order_qty = flt(
 				sum(flt(row.qty) for row in matching_rows)
 			)
-			previously_received_qty = self._get_lot_allocated_accepted_qty(
+			allocated_received_qty = self._get_lot_allocated_accepted_qty(
 				processor_lot.name
+			)
+			native_received_qty = flt(
+				sum(
+					max(
+						flt(row.received_qty)
+						- flt(row.returned_qty),
+						0.0,
+					)
+					for row in matching_rows
+				)
+			)
+			previously_received_qty = max(
+				allocated_received_qty,
+				native_received_qty,
 			)
 			credit_applied_qty = (
 				self._get_lot_submitted_credit_applied_qty(
@@ -1999,6 +2079,14 @@ def make_subcontracting_receipt(source_name, target_doc=None):
 	)
 
 	_validate_scr_creation(processor_lot_receipt)
+
+	if processor_lot_receipt._uses_v2_item_structure():
+		processor_lot_receipt._validate_v2_allocations()
+		return _make_v2_subcontracting_receipt(
+			processor_lot_receipt,
+			target_doc,
+		)
+
 	processor_lot_receipt._validate_lot_allocations()
 
 	from erpnext.subcontracting.doctype.subcontracting_order.subcontracting_order import (
@@ -2086,7 +2174,7 @@ def make_subcontracting_receipt(source_name, target_doc=None):
 		item = matching_rows[0]
 		item.qty = allocated_qty
 		item.rejected_qty = 0
-		item.branch = target_doc.branch or processor_lot_receipt.branch
+		item.branch = target_doc.branch or processor_lot_receipt.get("branch")
 
 	target_doc.custom_processor_lot = (
 		processor_lot_receipt.processor_lot
@@ -2098,6 +2186,89 @@ def make_subcontracting_receipt(source_name, target_doc=None):
 		target_doc,
 		processor_lot_receipt,
 	)
+
+	return target_doc
+
+
+def _make_v2_subcontracting_receipt(processor_lot_receipt, target_doc=None):
+	"""Map V2 allocations to exact SCR rows in one target document."""
+	from erpnext.subcontracting.doctype.subcontracting_order.subcontracting_order import (
+		get_mapped_subcontracting_receipt,
+	)
+
+	seen_processor_lots = set()
+	for allocation in processor_lot_receipt.lot_allocations:
+		if allocation.processor_lot in seen_processor_lots:
+			frappe.throw(
+				_("Processor Lot {0} occurs more than once.").format(
+					frappe.bold(allocation.processor_lot)
+				),
+				title=_("Duplicate Processor Lot Allocation"),
+			)
+		seen_processor_lots.add(allocation.processor_lot)
+
+		allocated_qty = flt(
+			allocation.allocated_accepted_qty,
+			ITEM_QUANTITY_PRECISION,
+		)
+		if allocated_qty <= 0:
+			frappe.throw(
+				_("Allocation row {0} must have a positive Accepted Qty.").format(
+					allocation.idx
+				),
+				title=_("Invalid Lot Allocation"),
+			)
+
+		item_count_before_mapping = len(target_doc.items) if target_doc else 0
+		target_doc = get_mapped_subcontracting_receipt(
+			allocation.subcontracting_order,
+			target_doc,
+		)
+		new_items = target_doc.items[item_count_before_mapping:]
+		matching_rows = [
+			row
+			for row in new_items
+			if row.subcontracting_order_item
+			== allocation.subcontracting_order_item
+			and row.purchase_order_item
+			== allocation.purchase_order_item
+		]
+
+		if len(new_items) != 1 or len(matching_rows) != 1:
+			frappe.throw(
+				_(
+					"Subcontracting Order {0} must map exactly one row for "
+					"SCO Item {1} and PO Item {2}; ERPNext mapped {3} new "
+					"row(s), of which {4} matched."
+				).format(
+					frappe.bold(allocation.subcontracting_order),
+					frappe.bold(allocation.subcontracting_order_item),
+					frappe.bold(allocation.purchase_order_item),
+					len(new_items),
+					len(matching_rows),
+				),
+				title=_("Ambiguous Subcontracting Order Mapping"),
+			)
+
+		item = matching_rows[0]
+		if (
+			item.item_code != allocation.processed_item
+			or item.stock_uom != allocation.stock_uom
+		):
+			frappe.throw(
+				_("Mapped SCR row does not match Allocation row {0}.").format(
+					allocation.idx
+				),
+				title=_("Mapped SCR Item Mismatch"),
+			)
+
+		item.qty = allocated_qty
+		item.rejected_qty = 0
+		item.branch = target_doc.branch or processor_lot_receipt.get("branch")
+
+	target_doc.custom_processor_lot = processor_lot_receipt.processor_lot
+	target_doc.custom_processor_lot_receipt = processor_lot_receipt.name
+	_set_mapped_scr_posting_date(target_doc, processor_lot_receipt)
 
 	return target_doc
 
@@ -2278,28 +2449,18 @@ def _validate_scr_creation(processor_lot_receipt) -> None:
 			_("Please save the Processor Lot Receipt first.")
 		)
 
-	if (
+	is_v2 = (
 		processor_lot_receipt.receipt_structure_version
 		== V2_RECEIPT_STRUCTURE
-	):
-		frappe.throw(
-			_(
-				"V2 itemized Subcontracting Receipt mapping is not enabled "
-				"in this checkpoint."
-			),
-			title=_("V2 Document Flow Not Enabled"),
-		)
+	)
 
 	if processor_lot_receipt.docstatus == 2:
 		frappe.throw(
 			_("A cancelled Processor Lot Receipt cannot create an SCR.")
 		)
 
-	credit_qty = flt(
-		processor_lot_receipt.processor_material_credit_qty,
-		3,
-	)
-	if credit_qty > 0:
+	credit_qty = flt(processor_lot_receipt.processor_material_credit_qty, 3)
+	if not is_v2 and credit_qty > 0:
 		_validate_recorded_material_credit_for_scr(
 			processor_lot_receipt,
 			credit_qty,
@@ -2346,6 +2507,39 @@ def _validate_scr_creation(processor_lot_receipt) -> None:
 			),
 			title=_("Subcontracting Receipt Already Exists"),
 		)
+
+	if is_v2:
+		if not processor_lot_receipt.receipt_items:
+			frappe.throw(_("At least one Receipt Item is required."))
+
+		credit_items = [
+			item
+			for item in processor_lot_receipt.receipt_items
+			if flt(item.processor_material_credit_qty, ITEM_QUANTITY_PRECISION) > 0
+		]
+		if credit_items:
+			frappe.throw(
+				_(
+					"V2 SCR creation currently requires every Receipt Item to "
+					"be fully lot-backed. Material Credit document creation will "
+					"be enabled in its own checkpoint."
+				),
+				title=_("V2 Material Credit Not Yet Enabled"),
+			)
+
+		invalid_items = [
+			item.item_key
+			for item in processor_lot_receipt.receipt_items
+			if flt(item.company_accepted_qty, ITEM_QUANTITY_PRECISION) <= 0
+		]
+		if invalid_items:
+			frappe.throw(
+				_("Company Accepted Qty must be positive for Receipt Items: {0}.").format(
+					", ".join(invalid_items)
+				),
+				title=_("Invalid Receipt Item Quantity"),
+			)
+		return
 
 	if flt(processor_lot_receipt.company_accepted_qty) <= 0:
 			frappe.throw(
