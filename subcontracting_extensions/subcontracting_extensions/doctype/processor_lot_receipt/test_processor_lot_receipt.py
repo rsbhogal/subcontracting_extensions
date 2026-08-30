@@ -109,7 +109,104 @@ class TestProcessorLotReceipt(FrappeTestCase):
 		)
 
 		with self.assertRaises(frappe.ValidationError):
-			plr._validate_v2_allocation_links()
+			plr._validate_v2_allocations()
+
+	def test_v2_truck_differentials_allocate_repeated_readings(self):
+		plr = self._v2_plr(
+			items=[
+				{
+					"item_key": "ITEM-001",
+					"processed_item": "ITEM-A",
+					"stock_uom": "Kg",
+					"measurement_method": "Weight",
+					"measurement_basis": "Truck Differential Weight",
+				},
+				{
+					"item_key": "ITEM-002",
+					"processed_item": "ITEM-B",
+					"stock_uom": "Kg",
+					"measurement_method": "Weight",
+					"measurement_basis": "Truck Differential Weight",
+				},
+			],
+			weighments=[
+				{
+					"weighment_stage": "Arrival Loaded",
+					"scale_weight": 2000,
+					"measurement_uom": "Kg",
+				},
+				{
+					"weighment_stage": "After Unloading",
+					"receipt_item_key": "ITEM-001",
+					"scale_weight": 1400,
+					"measurement_uom": "Kg",
+				},
+				{
+					"weighment_stage": "Final Tare",
+					"receipt_item_key": "ITEM-002",
+					"scale_weight": 1000,
+					"measurement_uom": "Kg",
+				},
+			],
+		)
+
+		plr._calculate_v2_truck_differentials()
+
+		self.assertEqual(plr.item_weighments[1].derived_unloaded_qty, 600)
+		self.assertEqual(plr.item_weighments[2].derived_unloaded_qty, 400)
+		self.assertEqual(plr.receipt_items[0].company_accepted_qty, 600)
+		self.assertEqual(plr.receipt_items[1].company_accepted_qty, 400)
+
+	def test_v2_count_item_needs_no_weighment_rows(self):
+		plr = self._v2_plr(items=[{
+			"item_key": "ITEM-001",
+			"processed_item": "ITEM-A",
+			"stock_uom": "Units",
+			"measurement_method": "Count",
+			"measurement_basis": "In-house Weigh Count",
+			"company_accepted_qty": 40,
+		}])
+
+		plr._validate_v2_weighments()
+
+	def test_v2_item_lot_backing_is_calculated_independently(self):
+		plr = self._v2_plr(items=[
+			{
+				"item_key": "ITEM-001",
+				"processed_item": "ITEM-A",
+				"stock_uom": "Kg",
+				"measurement_method": "Weight",
+				"measurement_basis": "Separate Item Weight",
+				"company_accepted_qty": 120,
+				"supplier_invoice_qty": 125,
+			},
+			{
+				"item_key": "ITEM-002",
+				"processed_item": "ITEM-B",
+				"stock_uom": "Units",
+				"measurement_method": "Count",
+				"measurement_basis": "Direct Count",
+				"company_accepted_qty": 40,
+				"supplier_invoice_qty": 39,
+			},
+		])
+
+		capacities = {
+			"ITEM-001": [frappe._dict(available_qty=100)],
+			"ITEM-002": [frappe._dict(available_qty=50)],
+		}
+		with patch.object(
+			plr,
+			"_get_v2_fifo_candidates",
+			side_effect=lambda item: capacities[item.item_key],
+		):
+			plr._calculate_v2_item_lot_backing()
+
+		self.assertEqual(plr.receipt_items[0].lot_backed_qty, 100)
+		self.assertEqual(plr.receipt_items[0].processor_material_credit_qty, 20)
+		self.assertEqual(plr.receipt_items[0].material_credit_invoice_qty, 20)
+		self.assertEqual(plr.receipt_items[1].lot_backed_qty, 40)
+		self.assertEqual(plr.receipt_items[1].processor_material_credit_qty, 0)
 
 	def test_equivalent_posting_time_representations_match(self):
 		time_delta = timedelta(

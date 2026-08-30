@@ -19,7 +19,7 @@ from datetime import time, timedelta
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import flt, get_datetime
 from subcontracting_extensions.subcontracting_extensions.doctype.processor_lot.processor_lot import (
         refresh_processor_lot_receipt_summary,
 )
@@ -121,7 +121,10 @@ class ProcessorLotReceipt(Document):
 
 		if self._uses_v2_item_structure():
 			self._prepare_v2_receipt_items()
+			self._calculate_v2_truck_differentials()
 			self._calculate_v2_item_commercial_reconciliation()
+			self._calculate_v2_item_lot_backing()
+			self._ensure_initial_v2_allocations()
 			self._sync_single_v2_item_to_legacy_header()
 			return
 
@@ -139,8 +142,9 @@ class ProcessorLotReceipt(Document):
 
 		if self._uses_v2_item_structure():
 			self._validate_v2_receipt_items()
-			self._validate_v2_weighment_links()
-			self._validate_v2_allocation_links()
+			self._validate_v2_weighments()
+			self._validate_v2_allocations()
+			self._validate_v2_material_credit()
 			self._validate_v2_document_flow_gate()
 			return
 
@@ -264,6 +268,282 @@ class ProcessorLotReceipt(Document):
 				else 0.0
 			)
 
+	def _calculate_v2_truck_differentials(self) -> None:
+		"""Derive accepted item quantities from chronological scale readings."""
+		rows = list(self.item_weighments or [])
+		if not rows:
+			return
+
+		items_by_key = {
+			item.item_key: item
+			for item in self.receipt_items or []
+		}
+		first_row = rows[0]
+		if first_row.weighment_stage != "Arrival Loaded":
+			frappe.throw(
+				_("The first Item Weighment must be Arrival Loaded."),
+				title=_("Invalid Weighment Sequence"),
+			)
+
+		first_row.receipt_item_key = None
+		first_row.processed_item = None
+		first_row.derived_unloaded_qty = 0.0
+		first_row.adjustment_qty = 0.0
+		first_row.accepted_qty = 0.0
+		accepted_by_item = {}
+		previous_weight = flt(first_row.scale_weight, 3)
+		measurement_uom = first_row.measurement_uom
+		previous_moment = self._v2_weighment_moment(first_row)
+
+		for row in rows[1:]:
+			current_moment = self._v2_weighment_moment(row)
+			if (
+				previous_moment
+				and current_moment
+				and current_moment < previous_moment
+			):
+				frappe.throw(
+					_("Weighment row {0} is earlier than the preceding reading.").format(
+						row.idx
+					),
+					title=_("Invalid Weighment Sequence"),
+				)
+			if row.weighment_stage == "Arrival Loaded":
+				frappe.throw(
+					_("Arrival Loaded may occur only as the first weighment."),
+					title=_("Invalid Weighment Sequence"),
+				)
+
+			if row.measurement_uom != measurement_uom:
+				frappe.throw(
+					_("All truck differential readings must use UOM {0}.").format(
+						frappe.bold(measurement_uom)
+					),
+					title=_("Mixed Weighment UOM"),
+				)
+
+			item = items_by_key.get(row.receipt_item_key)
+			if not item:
+				frappe.throw(
+					_("Weighment row {0} must identify a valid Receipt Item.").format(
+						row.idx
+					),
+					title=_("Weighment Item Required"),
+				)
+
+			if (
+				item.measurement_method != "Weight"
+				or item.measurement_basis != "Truck Differential Weight"
+			):
+				frappe.throw(
+					_("Weighment row {0} refers to an item not measured by truck differential.").format(
+						row.idx
+					),
+					title=_("Invalid Weighment Item"),
+				)
+
+			if item.stock_uom != measurement_uom:
+				frappe.throw(
+					_("Receipt Item {0} uses Stock UOM {1}, not weighment UOM {2}.").format(
+						frappe.bold(item.item_key),
+						frappe.bold(item.stock_uom),
+						frappe.bold(measurement_uom),
+					),
+					title=_("Weighment UOM Does Not Match Item"),
+				)
+
+			current_weight = flt(row.scale_weight, 3)
+			if current_weight > previous_weight:
+				frappe.throw(
+					_("Weighment row {0} exceeds the preceding scale reading.").format(
+						row.idx
+					),
+					title=_("Invalid Weighment Sequence"),
+				)
+
+			derived_qty = flt(previous_weight - current_weight, 3)
+			accepted_qty = flt(
+				derived_qty + flt(row.adjustment_qty, 3),
+				3,
+			)
+			if accepted_qty < 0:
+				frappe.throw(
+					_("Weighment row {0} has a negative Accepted Qty after adjustment.").format(
+						row.idx
+					),
+					title=_("Invalid Weighment Adjustment"),
+				)
+
+			row.processed_item = item.processed_item
+			row.derived_unloaded_qty = derived_qty
+			row.accepted_qty = accepted_qty
+			accepted_by_item[item.item_key] = flt(
+				accepted_by_item.get(item.item_key, 0.0) + accepted_qty,
+				ITEM_QUANTITY_PRECISION,
+			)
+			previous_weight = current_weight
+			previous_moment = current_moment or previous_moment
+
+		for item in self.receipt_items or []:
+			if item.measurement_basis == "Truck Differential Weight":
+				item.company_accepted_qty = flt(
+					accepted_by_item.get(item.item_key, 0.0),
+					ITEM_QUANTITY_PRECISION,
+				)
+
+	@staticmethod
+	def _v2_weighment_moment(row):
+		"""Return a comparable reading timestamp when its date is available."""
+		if not row.weighment_date:
+			return None
+
+		return get_datetime(
+			f"{row.weighment_date} {row.weighment_time or '00:00:00'}"
+		)
+
+	def _calculate_v2_item_lot_backing(self) -> None:
+		"""Split every item independently between lot backing and credit."""
+		for item in self.receipt_items or []:
+			accepted_qty = flt(item.company_accepted_qty, ITEM_QUANTITY_PRECISION)
+			invoice_qty = flt(item.supplier_invoice_qty, ITEM_QUANTITY_PRECISION)
+			available_qty = flt(
+				sum(
+					flt(candidate.available_qty)
+					for candidate in self._get_v2_fifo_candidates(item)
+				),
+				ITEM_QUANTITY_PRECISION,
+			)
+
+			item.lot_backed_qty = flt(
+				min(accepted_qty, available_qty),
+				ITEM_QUANTITY_PRECISION,
+			)
+			item.processor_material_credit_qty = flt(
+				max(accepted_qty - available_qty, 0.0),
+				ITEM_QUANTITY_PRECISION,
+			)
+			item.material_credit_invoice_qty = flt(
+				min(
+					max(invoice_qty - item.lot_backed_qty, 0.0),
+					item.processor_material_credit_qty,
+				),
+				ITEM_QUANTITY_PRECISION,
+			)
+
+			if flt(item.processor_material_credit_qty) <= 0:
+				item.material_credit_status = "Not Applicable"
+			elif item.material_credit_status in (None, "", "Not Applicable"):
+				item.material_credit_status = "Proposed"
+
+	def _get_v2_fifo_candidates(self, item) -> list[frappe._dict]:
+		"""Return FIFO lot capacity compatible with one receipt item."""
+		processor_lots = frappe.get_all(
+			"Processor Lot",
+			filters={
+				"docstatus": 0,
+				"company": self.company,
+				"supplier": self.supplier,
+				"supplier_warehouse": self.supplier_warehouse,
+			},
+			fields=[
+				"name",
+				"subcontracting_order",
+				"purchase_order",
+				"creation",
+			],
+			order_by="creation asc, name asc",
+		)
+		candidates = []
+
+		for processor_lot in processor_lots:
+			sco = frappe.get_doc(
+				"Subcontracting Order",
+				processor_lot.subcontracting_order,
+			)
+			if sco.docstatus != 1:
+				continue
+
+			matching_rows = [
+				row
+				for row in sco.items
+				if row.item_code == item.processed_item
+				and row.stock_uom == item.stock_uom
+			]
+			if not matching_rows:
+				continue
+
+			if len(matching_rows) != 1:
+				frappe.throw(
+					_("Subcontracting Order {0} has multiple compatible rows for {1}.").format(
+						frappe.bold(sco.name),
+						frappe.bold(item.processed_item),
+					),
+					title=_("Ambiguous Subcontracting Order Item"),
+				)
+
+			sco_item = matching_rows[0]
+			lot_order_qty = flt(sco_item.qty, ITEM_QUANTITY_PRECISION)
+			previously_received_qty = self._get_lot_allocated_accepted_qty(
+				processor_lot.name
+			)
+			credit_applied_qty = self._get_lot_submitted_credit_applied_qty_for_item(
+				processor_lot.name,
+				item.processed_item,
+				item.stock_uom,
+			)
+			available_qty = flt(
+				lot_order_qty - previously_received_qty - credit_applied_qty,
+				ITEM_QUANTITY_PRECISION,
+			)
+			if available_qty <= 0:
+				continue
+
+			candidates.append(frappe._dict(
+				processor_lot=processor_lot.name,
+				subcontracting_order=sco.name,
+				subcontracting_order_item=sco_item.name,
+				purchase_order=processor_lot.purchase_order,
+				purchase_order_item=sco_item.purchase_order_item,
+				lot_date=sco.transaction_date,
+				lot_order_qty=lot_order_qty,
+				previously_received_qty=previously_received_qty,
+				credit_applied_qty=credit_applied_qty,
+				available_qty=available_qty,
+				creation=processor_lot.creation,
+			))
+
+		return sorted(
+			candidates,
+			key=lambda row: (
+				row.lot_date,
+				row.creation,
+				row.processor_lot,
+			),
+		)
+
+	def _get_lot_submitted_credit_applied_qty_for_item(
+		self,
+		processor_lot: str,
+		processed_item: str,
+		stock_uom: str,
+	) -> float:
+		return flt(
+			frappe.db.get_value(
+				"Processor Material Account Entry",
+				{
+					"entry_type": "Credit Applied",
+					"source_event": "Processor Lot Shortage",
+					"processor_lot": processor_lot,
+					"processed_item": processed_item,
+					"processed_item_uom": stock_uom,
+					"account_direction": "Debit",
+					"docstatus": 1,
+					"is_reversed": 0,
+				},
+				"SUM(processed_qty)",
+			)
+			or 0
+		)
 	def _sync_single_v2_item_to_legacy_header(self) -> None:
 		"""Maintain legacy summary fields only for a one-item V2 receipt.
 
@@ -385,17 +665,13 @@ class ProcessorLotReceipt(Document):
 					title=_("Invalid Measurement Basis"),
 				)
 
-	def _validate_v2_weighment_links(self) -> None:
-		"""Validate item keys on staged V2 weighment rows.
-
-		Differential computation is intentionally deferred to the next
-		checkpoint, where its sequence rules can be introduced and tested as
-		one atomic change.
-		"""
+	def _validate_v2_weighments(self) -> None:
+		"""Validate scale readings and required differential coverage."""
 		items_by_key = {
 			item.item_key: item
 			for item in self.receipt_items or []
 		}
+		weighed_item_keys = set()
 
 		for row in self.item_weighments or []:
 			if flt(row.scale_weight) < 0:
@@ -406,6 +682,12 @@ class ProcessorLotReceipt(Document):
 				)
 
 			if not row.receipt_item_key:
+				if row.weighment_stage != "Arrival Loaded":
+					frappe.throw(
+						_("Weighment row {0}: Receipt Item Key is required.").format(
+							row.idx
+						)
+					)
 				row.processed_item = None
 				continue
 
@@ -420,13 +702,95 @@ class ProcessorLotReceipt(Document):
 				)
 
 			row.processed_item = item.processed_item
+			weighed_item_keys.add(item.item_key)
 
-	def _validate_v2_allocation_links(self) -> None:
-		"""Require each staged allocation to identify its receipt item."""
+		for item in self.receipt_items or []:
+			if (
+				item.measurement_basis == "Truck Differential Weight"
+				and item.item_key not in weighed_item_keys
+			):
+				frappe.throw(
+					_("Receipt Item {0} has no truck differential weighment.").format(
+						frappe.bold(item.item_key)
+					),
+					title=_("Item Weighment Required"),
+				)
+
+	def _ensure_initial_v2_allocations(self) -> None:
+		"""Create FIFO allocations independently for each unallocated item."""
+		allocated_item_keys = {
+			row.receipt_item_key
+			for row in self.lot_allocations or []
+			if row.receipt_item_key
+		}
+
+		for item in self.receipt_items or []:
+			if item.item_key in allocated_item_keys:
+				continue
+
+			accepted_remaining = flt(
+				item.lot_backed_qty,
+				ITEM_QUANTITY_PRECISION,
+			)
+			invoice_remaining = flt(
+				flt(item.supplier_invoice_qty)
+				- flt(item.material_credit_invoice_qty),
+				ITEM_QUANTITY_PRECISION,
+			)
+			created_rows = []
+
+			for candidate in self._get_v2_fifo_candidates(item):
+				if accepted_remaining <= 0:
+					break
+
+				allocated_accepted_qty = min(
+					accepted_remaining,
+					candidate.available_qty,
+				)
+				allocated_invoice_qty = min(
+					invoice_remaining,
+					allocated_accepted_qty,
+				)
+				row = self.append("lot_allocations", {
+					"receipt_item_key": item.item_key,
+					"processor_lot": candidate.processor_lot,
+					"subcontracting_order": candidate.subcontracting_order,
+					"subcontracting_order_item": candidate.subcontracting_order_item,
+					"purchase_order": candidate.purchase_order,
+					"purchase_order_item": candidate.purchase_order_item,
+					"lot_date": candidate.lot_date,
+					"processed_item": item.processed_item,
+					"stock_uom": item.stock_uom,
+					"lot_order_qty": candidate.lot_order_qty,
+					"previously_received_qty": candidate.previously_received_qty,
+					"available_qty": candidate.available_qty,
+					"allocated_accepted_qty": allocated_accepted_qty,
+					"allocated_invoice_qty": allocated_invoice_qty,
+				})
+				created_rows.append(row)
+				accepted_remaining = flt(
+					accepted_remaining - allocated_accepted_qty,
+					ITEM_QUANTITY_PRECISION,
+				)
+				invoice_remaining = flt(
+					invoice_remaining - allocated_invoice_qty,
+					ITEM_QUANTITY_PRECISION,
+				)
+
+			if created_rows and invoice_remaining > 0:
+				created_rows[-1].allocated_invoice_qty = flt(
+					created_rows[-1].allocated_invoice_qty + invoice_remaining,
+					ITEM_QUANTITY_PRECISION,
+				)
+
+	def _validate_v2_allocations(self) -> None:
+		"""Validate lineage, capacity and totals independently by item."""
 		items_by_key = {
 			item.item_key: item
 			for item in self.receipt_items or []
 		}
+		rows_by_item = {}
+		seen_lots = set()
 
 		for row in self.lot_allocations or []:
 			item = items_by_key.get(row.receipt_item_key)
@@ -449,6 +813,135 @@ class ProcessorLotReceipt(Document):
 						frappe.bold(item.item_key),
 					),
 					title=_("Allocation Item Mismatch"),
+				)
+
+			if row.processor_lot in seen_lots:
+				frappe.throw(
+					_("Processor Lot {0} occurs more than once.").format(
+						frappe.bold(row.processor_lot)
+					),
+					title=_("Duplicate Processor Lot Allocation"),
+				)
+			seen_lots.add(row.processor_lot)
+			rows_by_item.setdefault(item.item_key, []).append(row)
+
+		for item in self.receipt_items or []:
+			rows = rows_by_item.get(item.item_key, [])
+			candidates = {
+				candidate.processor_lot: candidate
+				for candidate in self._get_v2_fifo_candidates(item)
+			}
+			total_accepted = 0.0
+			total_invoice = 0.0
+
+			for row in rows:
+				candidate = candidates.get(row.processor_lot)
+				if not candidate:
+					frappe.throw(
+						_("Allocation row {0}: Processor Lot {1} is not eligible.").format(
+							row.idx,
+							frappe.bold(row.processor_lot),
+						),
+						title=_("Processor Lot Is Not Open"),
+					)
+
+				if (
+					row.subcontracting_order_item != candidate.subcontracting_order_item
+					or row.purchase_order_item != candidate.purchase_order_item
+				):
+					frappe.throw(
+						_("Allocation row {0} has incorrect order-item lineage.").format(
+							row.idx
+						),
+						title=_("Invalid Allocation Lineage"),
+					)
+
+				row.subcontracting_order = candidate.subcontracting_order
+				row.purchase_order = candidate.purchase_order
+				row.lot_date = candidate.lot_date
+				row.lot_order_qty = candidate.lot_order_qty
+				row.previously_received_qty = candidate.previously_received_qty
+				row.available_qty = candidate.available_qty
+				accepted_qty = flt(row.allocated_accepted_qty, ITEM_QUANTITY_PRECISION)
+				invoice_qty = flt(row.allocated_invoice_qty, ITEM_QUANTITY_PRECISION)
+
+				if accepted_qty < 0 or invoice_qty < 0:
+					frappe.throw(
+						_("Allocation row {0} quantities cannot be negative.").format(row.idx),
+						title=_("Invalid Lot Allocation"),
+					)
+				if accepted_qty > flt(candidate.available_qty, ITEM_QUANTITY_PRECISION):
+					frappe.throw(
+						_("Allocation row {0} exceeds available quantity {1}.").format(
+							row.idx,
+							frappe.bold(candidate.available_qty),
+						),
+						title=_("Processor Lot Over-Allocation"),
+					)
+
+				row.invoice_vs_accepted_qty = flt(
+					invoice_qty - accepted_qty,
+					ITEM_QUANTITY_PRECISION,
+				) if invoice_qty else 0.0
+				row.allocation_status = (
+					"Fully Allocated"
+					if accepted_qty == flt(candidate.available_qty, ITEM_QUANTITY_PRECISION)
+					else "Partly Allocated"
+				)
+				total_accepted += accepted_qty
+				total_invoice += invoice_qty
+
+			expected_accepted = flt(item.lot_backed_qty, ITEM_QUANTITY_PRECISION)
+			expected_invoice = flt(
+				flt(item.supplier_invoice_qty) - flt(item.material_credit_invoice_qty),
+				ITEM_QUANTITY_PRECISION,
+			)
+			if flt(total_accepted, ITEM_QUANTITY_PRECISION) != expected_accepted:
+				frappe.throw(
+					_("Receipt Item {0}: allocated accepted quantity must equal {1}.").format(
+						frappe.bold(item.item_key),
+						frappe.bold(expected_accepted),
+					),
+					title=_("Accepted Quantity Not Fully Allocated"),
+				)
+			if flt(total_invoice, ITEM_QUANTITY_PRECISION) != expected_invoice:
+				frappe.throw(
+					_("Receipt Item {0}: allocated invoice quantity must equal {1}.").format(
+						frappe.bold(item.item_key),
+						frappe.bold(expected_invoice),
+					),
+					title=_("Invoice Quantity Not Fully Allocated"),
+				)
+
+	def _validate_v2_material_credit(self) -> None:
+		"""Require per-item authority and explanation for excess receipts."""
+		for item in self.receipt_items or []:
+			credit_qty = flt(item.processor_material_credit_qty, ITEM_QUANTITY_PRECISION)
+			credit_invoice_qty = flt(item.material_credit_invoice_qty, ITEM_QUANTITY_PRECISION)
+			if credit_qty <= 0:
+				if credit_invoice_qty:
+					frappe.throw(
+						_("Receipt Item {0} has invoice credit without physical credit.").format(
+							item.item_key
+						)
+					)
+				continue
+
+			if not item.allow_processor_material_credit:
+				frappe.throw(
+					_("Receipt Item {0} requires approval for Material Credit {1} {2}.").format(
+						frappe.bold(item.item_key),
+						frappe.bold(credit_qty),
+						frappe.bold(item.stock_uom),
+					),
+					title=_("Processor Material Credit Approval Required"),
+				)
+			if not (item.material_credit_reason or "").strip():
+				frappe.throw(
+					_("Receipt Item {0} requires a Material Credit Reason.").format(
+						frappe.bold(item.item_key)
+					),
+					title=_("Material Credit Reason Required"),
 				)
 
 	def _validate_v2_document_flow_gate(self) -> None:
