@@ -367,19 +367,6 @@ def _get_plr_invoice_qty_by_scr_item(source_doc):
 			title=_("Subcontracting Receipt Link Mismatch"),
 		)
 
-	credit_items = [
-		item.item_key
-		for item in plr.receipt_items or []
-		if flt(item.material_credit_invoice_qty) > 0
-	]
-	if credit_items:
-		frappe.throw(
-			_("V2 commercial mapping is not yet enabled for billed Material Credit on: {0}.").format(
-				", ".join(credit_items)
-			),
-			title=_("V2 Material Credit Not Yet Enabled"),
-		)
-
 	scr_items_by_name = {
 		item.name: item
 		for item in source_doc.items
@@ -430,6 +417,43 @@ def _get_plr_invoice_qty_by_scr_item(source_doc):
 
 		invoice_qty_by_scr_item[scr_item.name] = flt(
 			allocation.allocated_invoice_qty
+		)
+
+	for receipt_item in plr.receipt_items or []:
+		credit_invoice_qty = flt(
+			receipt_item.material_credit_invoice_qty,
+			6,
+		)
+		if credit_invoice_qty <= 0:
+			continue
+
+		backed_allocations = [
+			allocation
+			for allocation in plr.lot_allocations or []
+			if allocation.receipt_item_key == receipt_item.item_key
+			and flt(allocation.allocated_accepted_qty, 6) > 0
+		]
+		if not backed_allocations:
+			frappe.throw(
+				_("Receipt Item {0} has billed Material Credit but no positive backed allocation.").format(
+					frappe.bold(receipt_item.item_key)
+				),
+				title=_("Material Credit Commercial Lineage Missing"),
+			)
+
+		final_allocation = backed_allocations[-1]
+		scr_item_name = final_allocation.subcontracting_receipt_item
+		if not scr_item_name or scr_item_name not in invoice_qty_by_scr_item:
+			frappe.throw(
+				_("Receipt Item {0} final allocation has no valid saved SCR Item link.").format(
+					frappe.bold(receipt_item.item_key)
+				),
+				title=_("Material Credit Commercial Lineage Missing"),
+			)
+
+		invoice_qty_by_scr_item[scr_item_name] = flt(
+			invoice_qty_by_scr_item[scr_item_name] + credit_invoice_qty,
+			6,
 		)
 
 	missing_scr_items = sorted(

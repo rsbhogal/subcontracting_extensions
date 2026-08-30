@@ -72,6 +72,7 @@ def get_compatible_open_credits(
             "creation",
             "source_event",
             "processor_lot_receipt",
+            "receipt_item_key",
             "processor_lot",
             "subcontracting_order",
             "processed_qty",
@@ -142,6 +143,7 @@ def get_compatible_open_credits(
                 "posting_date": row.posting_date,
                 "source_event": row.source_event,
                 "processor_lot_receipt": row.processor_lot_receipt,
+                "receipt_item_key": row.receipt_item_key,
                 "processor_lot": row.processor_lot,
                 "subcontracting_order": row.subcontracting_order,
                 "available_processed_qty": available_processed_qty,
@@ -407,6 +409,29 @@ def _get_single_component(sco) -> tuple[str, str]:
 def _get_source_credit_invoice_qty(credit) -> float:
     if credit.source_event != "PLR Excess" or not credit.processor_lot_receipt:
         return 0.0
+    receipt_item_key = getattr(credit, "receipt_item_key", None)
+    if receipt_item_key:
+        invoice_qty = frappe.db.get_value(
+            "Processor Lot Receipt Item",
+            {
+                "parent": credit.processor_lot_receipt,
+                "parenttype": "Processor Lot Receipt",
+                "item_key": receipt_item_key,
+            },
+            "material_credit_invoice_qty",
+        )
+        if invoice_qty is None:
+            frappe.throw(
+                _(
+                    "Receipt Item {0} is missing from "
+                    "Processor Lot Receipt {1}."
+                ).format(
+                    frappe.bold(receipt_item_key),
+                    frappe.bold(credit.processor_lot_receipt),
+                )
+            )
+        return flt(invoice_qty, 6)
+
     return flt(
         frappe.db.get_value(
             "Processor Lot Receipt",

@@ -17,6 +17,9 @@ import frappe
 from frappe import _
 from frappe.utils import flt, getdate, nowtime
 
+
+MATERIAL_QUANTITY_PRECISION = 6
+
 from subcontracting_extensions.subcontracting_extensions.doctype.processor_lot.fact_engine import (
     get_sco_facts,
 )
@@ -183,8 +186,8 @@ def get_credit_application_completion_status(
                 "journal_entry": journal_entry,
                 "journal_entry_docstatus": journal_entry_docstatus,
                 "against_entry": row.against_entry,
-                "account_qty": flt(row.account_qty, 3),
-                "commercial_qty": flt(row.commercial_qty, 3),
+                "account_qty": flt(row.account_qty, MATERIAL_QUANTITY_PRECISION),
+                "commercial_qty": flt(row.commercial_qty, MATERIAL_QUANTITY_PRECISION),
                 "account_uom": row.account_uom,
                 "state": classification["state"],
                 "next_doctype": classification["next_doctype"],
@@ -320,7 +323,7 @@ def create_credit_application_documents(
         )
         commercial_match_offset = flt(
             commercial_match_offset
-            + flt(proposed.get("commercially_matched_qty"), 3),
+            + flt(proposed.get("commercially_matched_qty"), MATERIAL_QUANTITY_PRECISION),
             3,
         )
 
@@ -353,11 +356,11 @@ def _create_one_application(
     application.source_event = "Processor Lot Shortage"
     application.processor_lot = lot.name
     application.against_entry = source.name
-    application.processed_qty = flt(proposed.get("processed_qty"), 3)
-    application.account_qty = flt(proposed.get("account_qty"), 3)
+    application.processed_qty = flt(proposed.get("processed_qty"), MATERIAL_QUANTITY_PRECISION)
+    application.account_qty = flt(proposed.get("account_qty"), MATERIAL_QUANTITY_PRECISION)
     application.commercial_qty = flt(
         proposed.get("commercially_matched_qty"),
-        3,
+        MATERIAL_QUANTITY_PRECISION,
     )
     application.created_by_system = 1
     application.remarks = _(
@@ -373,8 +376,8 @@ def _create_one_application(
     )
     commercial_matches = _get_commercial_matches(
         facts=facts,
-        required_qty=flt(application.commercial_qty, 3),
-        skip_qty=flt(commercial_match_offset, 3),
+        required_qty=flt(application.commercial_qty, MATERIAL_QUANTITY_PRECISION),
+        skip_qty=flt(commercial_match_offset, MATERIAL_QUANTITY_PRECISION),
     )
     journal_entry = _create_application_journal_entry(
         lot=lot,
@@ -399,8 +402,8 @@ def _create_one_application(
         "stock_entry": stock_entry.name,
         "journal_entry": journal_entry.name,
         "against_entry": source.name,
-        "account_qty": flt(application.account_qty, 3),
-        "commercial_qty": flt(application.commercial_qty, 3),
+        "account_qty": flt(application.account_qty, MATERIAL_QUANTITY_PRECISION),
+        "commercial_qty": flt(application.commercial_qty, MATERIAL_QUANTITY_PRECISION),
         "account_uom": application.account_uom,
     }
 
@@ -621,7 +624,7 @@ def _get_commercial_matches(
         required_qty=required_qty,
         skip_qty=skip_qty,
     )
-    if flt(required_qty, 3) <= 0:
+    if flt(required_qty, MATERIAL_QUANTITY_PRECISION) <= 0:
         return []
     matches = []
     purchase_order = (facts.get("identity") or {}).get("purchase_order")
@@ -670,27 +673,27 @@ def _allocate_commercial_match_quantities(
     skip_qty: float = 0.0,
 ) -> tuple[list[tuple[dict[str, Any], float]], float]:
     """Allocate after earlier applications' commercial quantity in FIFO order."""
-    remaining = max(flt(required_qty, 3), 0.0)
-    to_skip = max(flt(skip_qty, 3), 0.0)
+    remaining = max(flt(required_qty, MATERIAL_QUANTITY_PRECISION), 0.0)
+    to_skip = max(flt(skip_qty, MATERIAL_QUANTITY_PRECISION), 0.0)
     allocations: list[tuple[dict[str, Any], float]] = []
 
     for row in receipt_rows:
         variance_qty = max(
-            flt(row.get("supplier_invoice_vs_company_qty"), 3),
+            flt(row.get("supplier_invoice_vs_company_qty"), MATERIAL_QUANTITY_PRECISION),
             0.0,
         )
         if variance_qty <= 0:
             continue
 
         skipped = min(to_skip, variance_qty)
-        to_skip = flt(to_skip - skipped, 3)
-        available_qty = flt(variance_qty - skipped, 3)
+        to_skip = flt(to_skip - skipped, MATERIAL_QUANTITY_PRECISION)
+        available_qty = flt(variance_qty - skipped, MATERIAL_QUANTITY_PRECISION)
         if available_qty <= 0 or remaining <= 0:
             continue
 
         allocated_qty = min(remaining, available_qty)
         allocations.append((row, allocated_qty))
-        remaining = flt(remaining - allocated_qty, 3)
+        remaining = flt(remaining - allocated_qty, MATERIAL_QUANTITY_PRECISION)
 
     return allocations, remaining
 
@@ -744,7 +747,8 @@ def validate_credit_application_stock_entry(doc, method=None) -> None:
         valid = (
             item.item_code == application.principal_component
             and item.s_warehouse == application.supplier_warehouse
-            and flt(item.qty, 3) == flt(application.account_qty, 3)
+            and flt(item.qty, MATERIAL_QUANTITY_PRECISION)
+            == flt(application.account_qty, MATERIAL_QUANTITY_PRECISION)
             and item.expense_account == stock_adjustment
             and item.cost_center == lot.cost_center
         )
@@ -912,7 +916,7 @@ def _get_expected_journal_totals(application, lot):
     facts = get_sco_facts(application.subcontracting_order)
     commercial_matches = _get_commercial_matches(
         facts,
-        flt(application.commercial_qty, 3),
+        flt(application.commercial_qty, MATERIAL_QUANTITY_PRECISION),
         skip_qty=_get_prior_commercial_match_qty(application),
     )
     stock_adjustment = _get_company_account(
@@ -1016,7 +1020,7 @@ def _get_prior_commercial_match_qty(application) -> float:
         if row.name == application.name:
             break
         prior_qty += flt(row.commercial_qty)
-    return flt(prior_qty, 3)
+    return flt(prior_qty, MATERIAL_QUANTITY_PRECISION)
 
 
 def prevent_credit_application_document_cancel(doc, method=None) -> None:

@@ -1091,6 +1091,7 @@ def _get_submitted_advance_credit_facts(
         fields=[
             "name",
             "processor_lot_receipt",
+            "receipt_item_key",
             "processor_lot",
             "processed_qty",
             "account_qty",
@@ -1131,15 +1132,15 @@ def _get_submitted_advance_credit_facts(
         "entries": effective_rows,
         "total_processed_qty": flt(
             sum(flt(row.get("processed_qty")) for row in effective_rows),
-            3,
+            6,
         ),
         "total_account_qty": flt(
             sum(flt(row.get("account_qty")) for row in effective_rows),
-            3,
+            6,
         ),
         "total_commercial_qty": flt(
             sum(flt(row.get("commercial_qty")) for row in effective_rows),
-            3,
+            6,
         ),
     }
 

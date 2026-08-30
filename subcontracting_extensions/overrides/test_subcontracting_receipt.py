@@ -195,6 +195,87 @@ class TestSubcontractingReceiptPurchaseReceiptMapping(
 			{"PO-TEST-COMMERCIAL": 4030.0},
 		)
 
+	def test_v2_billed_credit_is_added_to_each_items_final_scr_row(self):
+		source_scr = self._source_scr()
+		source_scr.items[0].subcontracting_order_item = "SCO-A1"
+		source_scr.items.extend([
+			AttributeObject(
+				name="SCR-ITEM-A2",
+				idx=2,
+				purchase_order="PO-TEST-COMMERCIAL",
+				purchase_order_item="PO-A2",
+				subcontracting_order_item="SCO-A2",
+			),
+			AttributeObject(
+				name="SCR-ITEM-B1",
+				idx=3,
+				purchase_order="PO-TEST-COMMERCIAL",
+				purchase_order_item="PO-B1",
+				subcontracting_order_item="SCO-B1",
+			),
+		])
+		plr = AttributeObject(
+			name="PLR-TEST-COMMERCIAL",
+			receipt_structure_version="V2 Itemized",
+			subcontracting_receipt="SCR-TEST-COMMERCIAL",
+			receipt_items=[
+				AttributeObject(
+					item_key="ITEM-A",
+					material_credit_invoice_qty=5,
+				),
+				AttributeObject(
+					item_key="ITEM-B",
+					material_credit_invoice_qty=2,
+				),
+			],
+			lot_allocations=[
+				AttributeObject(
+					idx=1,
+					receipt_item_key="ITEM-A",
+					subcontracting_receipt_item="SCR-ITEM-TEST",
+					purchase_order_item="PO-ITEM-TEST",
+					subcontracting_order_item="SCO-A1",
+					allocated_accepted_qty=10,
+					allocated_invoice_qty=10,
+				),
+				AttributeObject(
+					idx=2,
+					receipt_item_key="ITEM-A",
+					subcontracting_receipt_item="SCR-ITEM-A2",
+					purchase_order_item="PO-A2",
+					subcontracting_order_item="SCO-A2",
+					allocated_accepted_qty=20,
+					allocated_invoice_qty=20,
+				),
+				AttributeObject(
+					idx=3,
+					receipt_item_key="ITEM-B",
+					subcontracting_receipt_item="SCR-ITEM-B1",
+					purchase_order_item="PO-B1",
+					subcontracting_order_item="SCO-B1",
+					allocated_accepted_qty=30,
+					allocated_invoice_qty=30,
+				),
+			],
+		)
+
+		with patch.object(
+			controller.frappe.db,
+			"exists",
+			return_value=True,
+		), patch.object(
+			controller.frappe,
+			"get_doc",
+			return_value=plr,
+		):
+			result = controller._get_plr_invoice_qty_by_scr_item(source_scr)
+
+		self.assertEqual(result, {
+			"SCR-ITEM-TEST": 10.0,
+			"SCR-ITEM-A2": 25.0,
+			"SCR-ITEM-B1": 32.0,
+		})
+
 	def test_billed_material_credit_is_added_to_last_backed_po(self):
 		source_scr = self._source_scr()
 		plr = AttributeObject(
