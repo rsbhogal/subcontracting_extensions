@@ -2562,15 +2562,19 @@ def _validate_scr_creation(processor_lot_receipt) -> None:
 			for item in processor_lot_receipt.receipt_items
 			if flt(item.processor_material_credit_qty, ITEM_QUANTITY_PRECISION) > 0
 		]
-		if credit_items:
-			frappe.throw(
-				_(
-					"V2 SCR creation currently requires every Receipt Item to "
-					"be fully lot-backed. Material Credit document creation will "
-					"be enabled in its own checkpoint."
-				),
-				title=_("V2 Material Credit Not Yet Enabled"),
+		for item in credit_items:
+			_validate_recorded_material_credit_for_scr(
+				processor_lot_receipt,
+				flt(item.processor_material_credit_qty, ITEM_QUANTITY_PRECISION),
+				receipt_item_key=item.item_key,
 			)
+			if flt(item.lot_backed_qty, ITEM_QUANTITY_PRECISION) <= 0:
+				frappe.throw(
+					_("Receipt Item {0} has no Lot Backed Qty from which an SCR row can be created.").format(
+						frappe.bold(item.item_key)
+					),
+					title=_("No Stock-Backed Quantity for SCR"),
+				)
 
 		invalid_items = [
 			item.item_key
@@ -2598,9 +2602,15 @@ def _validate_scr_creation(processor_lot_receipt) -> None:
 def _validate_recorded_material_credit_for_scr(
 	processor_lot_receipt,
 	credit_qty: float,
+	receipt_item_key: str | None = None,
 ) -> None:
 	"""Require an exact submitted PMA credit before mapping backed stock."""
-	if processor_lot_receipt.material_credit_status != "Recorded":
+	credit_source, receipt_item_key, precision = _get_material_credit_source(
+		processor_lot_receipt,
+		receipt_item_key,
+	)
+	credit_qty = flt(credit_qty, precision)
+	if credit_source.material_credit_status != "Recorded":
 		frappe.throw(
 			_(
 				"Processor Material Credit {0} {1} on Processor Lot "
@@ -2608,58 +2618,23 @@ def _validate_recorded_material_credit_for_scr(
 				"stock-backed Subcontracting Receipt."
 			).format(
 				frappe.bold(credit_qty),
-				frappe.bold(processor_lot_receipt.stock_uom),
+				frappe.bold(credit_source.stock_uom),
 				frappe.bold(processor_lot_receipt.name),
 			),
 			title=_("Processor Material Credit Is Not Recorded"),
 		)
 
-	entry = frappe.db.get_value(
-		"Processor Material Account Entry",
-		{
-			"entry_type": "Advance Credit",
-			"source_event": "PLR Excess",
-			"processor_lot_receipt": processor_lot_receipt.name,
-			"account_direction": "Credit",
-			"docstatus": 1,
-		},
-		["name", "processed_qty", "account_qty", "account_uom"],
-		as_dict=True,
+	_get_submitted_plr_material_credit(
+		processor_lot_receipt,
+		credit_qty,
+		receipt_item_key=receipt_item_key,
 	)
-
-	if not entry:
-		frappe.throw(
-			_(
-				"No submitted Processor Material Account credit exists "
-				"for Processor Lot Receipt {0}."
-			).format(frappe.bold(processor_lot_receipt.name)),
-			title=_("Submitted Material Credit Required"),
-		)
-
-	if (
-		flt(entry.processed_qty, 3) != credit_qty
-		or flt(entry.account_qty, 3) != credit_qty
-		or entry.account_uom != processor_lot_receipt.stock_uom
-	):
-		frappe.throw(
-			_(
-				"Submitted Processor Material Account Entry {0} does not "
-				"match the PLR credit of {1} {2}."
-			).format(
-				frappe.utils.get_link_to_form(
-					"Processor Material Account Entry",
-					entry.name,
-				),
-				frappe.bold(credit_qty),
-				frappe.bold(processor_lot_receipt.stock_uom),
-			),
-			title=_("Material Credit and PLR Do Not Match"),
-		)
 
 
 @frappe.whitelist()
 def create_material_credit_stock_entry(
 	processor_lot_receipt: str,
+	receipt_item_key: str | None = None,
 ) -> dict:
 	"""Create one linked Draft Material Receipt for a recorded PLR credit.
 
@@ -2692,7 +2667,14 @@ def create_material_credit_stock_entry(
 			title=_("Invalid Processor Lot Receipt"),
 		)
 
-	credit_qty = flt(plr.processor_material_credit_qty, 3)
+	credit_source, receipt_item_key, precision = _get_material_credit_source(
+		plr,
+		receipt_item_key,
+	)
+	credit_qty = flt(
+		credit_source.processor_material_credit_qty,
+		precision,
+	)
 	if credit_qty <= 0:
 		frappe.throw(
 			_("Processor Lot Receipt {0} has no material credit to receive.").format(
@@ -2701,15 +2683,24 @@ def create_material_credit_stock_entry(
 			title=_("No Processor Material Credit"),
 		)
 
-	_validate_recorded_material_credit_for_scr(plr, credit_qty)
-	pma = _get_submitted_plr_material_credit(plr, credit_qty)
-	scr = _get_submitted_backed_scr(plr)
-	_existing_material_credit_stock_entry(plr, pma)
+	_validate_recorded_material_credit_for_scr(
+		plr,
+		credit_qty,
+		receipt_item_key=receipt_item_key,
+	)
+	pma = _get_submitted_plr_material_credit(
+		plr,
+		credit_qty,
+		receipt_item_key=receipt_item_key,
+	)
+	scr = _get_submitted_backed_scr(plr, receipt_item_key)
+	_existing_material_credit_stock_entry(plr, pma, credit_source)
 
 	valuation = _get_material_credit_valuation(
 		plr=plr,
 		pma=pma,
 		scr=scr,
+		receipt_item_key=receipt_item_key,
 	)
 	processor_liability = _get_processor_material_account(
 		company=plr.company,
@@ -2741,7 +2732,7 @@ def create_material_credit_stock_entry(
 	stock_entry.append(
 		"items",
 		{
-			"item_code": plr.processed_item,
+			"item_code": credit_source.processed_item,
 			"t_warehouse": valuation["target_warehouse"],
 			"qty": credit_qty,
 			"basic_rate": valuation["component_rate"],
@@ -2757,7 +2748,7 @@ def create_material_credit_stock_entry(
 				"description": _(
 					"Unbilled processing cost for {0} {1} Processor Material "
 					"Credit from {2}"
-				).format(credit_qty, plr.stock_uom, plr.name),
+				).format(credit_qty, credit_source.stock_uom, plr.name),
 				"amount": valuation["processing_value"],
 			},
 		)
@@ -2766,8 +2757,8 @@ def create_material_credit_stock_entry(
 	_created_item = stock_entry.items[0]
 	if (
 		stock_entry.docstatus != 0
-		or flt(_created_item.qty, 3) != credit_qty
-		or _created_item.item_code != plr.processed_item
+		or flt(_created_item.qty, precision) != credit_qty
+		or _created_item.item_code != credit_source.processed_item
 		or _created_item.t_warehouse != valuation["target_warehouse"]
 		or _created_item.expense_account != processor_liability
 		or flt(_created_item.basic_rate, 6)
@@ -2795,8 +2786,12 @@ def create_material_credit_stock_entry(
 		)
 
 	frappe.db.set_value(
-		"Processor Lot Receipt",
-		plr.name,
+		(
+			"Processor Lot Receipt Item"
+			if receipt_item_key
+			else "Processor Lot Receipt"
+		),
+		credit_source.name if receipt_item_key else plr.name,
 		"material_credit_stock_entry",
 		stock_entry.name,
 		update_modified=False,
@@ -2815,10 +2810,11 @@ def create_material_credit_stock_entry(
 		"docstatus": stock_entry.docstatus,
 		"action": "Created",
 		"processor_lot_receipt": plr.name,
+		"receipt_item_key": receipt_item_key,
 		"processor_material_account_entry": pma.name,
 		"subcontracting_receipt": scr.name,
 		"credit_qty": credit_qty,
-		"stock_uom": plr.stock_uom,
+		"stock_uom": credit_source.stock_uom,
 		"target_warehouse": valuation["target_warehouse"],
 		"component_rate": valuation["component_rate"],
 		"processing_rate": valuation["processing_rate"],
@@ -2834,8 +2830,16 @@ def create_material_credit_stock_entry(
 	}
 
 
-def _get_submitted_plr_material_credit(plr, credit_qty: float):
+def _get_submitted_plr_material_credit(
+	plr,
+	credit_qty: float,
+	receipt_item_key: str | None = None,
+):
 	"""Return the single submitted PMA credit that exactly matches the PLR."""
+	credit_source, receipt_item_key, precision = _get_material_credit_source(
+		plr,
+		receipt_item_key,
+	)
 	entries = frappe.get_all(
 		"Processor Material Account Entry",
 		filters={
@@ -2853,8 +2857,14 @@ def _get_submitted_plr_material_credit(plr, credit_qty: float):
 			"processed_item",
 			"principal_component",
 			"material_credit_stock_entry",
+			"receipt_item_key",
 		],
 	)
+	entries = [
+		entry
+		for entry in entries
+		if (entry.receipt_item_key or "") == (receipt_item_key or "")
+	]
 	if len(entries) != 1:
 		frappe.throw(
 			_(
@@ -2866,10 +2876,10 @@ def _get_submitted_plr_material_credit(plr, credit_qty: float):
 
 	entry = entries[0]
 	if (
-		flt(entry.processed_qty, 3) != credit_qty
-		or flt(entry.account_qty, 3) != credit_qty
-		or entry.account_uom != plr.stock_uom
-		or entry.processed_item != plr.processed_item
+		flt(entry.processed_qty, precision) != flt(credit_qty, precision)
+		or flt(entry.account_qty, precision) != flt(credit_qty, precision)
+		or entry.account_uom != credit_source.stock_uom
+		or entry.processed_item != credit_source.processed_item
 		or not entry.principal_component
 	):
 		frappe.throw(
@@ -2882,7 +2892,42 @@ def _get_submitted_plr_material_credit(plr, credit_qty: float):
 	return entry
 
 
-def _get_submitted_backed_scr(plr):
+def _get_v2_backed_scr_item_names(plr, scr, receipt_item_key: str) -> set[str]:
+	"""Return exact saved SCR rows linked to one V2 receipt item."""
+	allocations = [
+		row
+		for row in plr.lot_allocations or []
+		if row.receipt_item_key == receipt_item_key
+		and flt(row.allocated_accepted_qty, ITEM_QUANTITY_PRECISION) > 0
+	]
+	if not allocations:
+		frappe.throw(
+			_("Receipt Item {0} has no positive backed allocations.").format(
+				frappe.bold(receipt_item_key)
+			)
+		)
+	missing_links = [row.idx for row in allocations if not row.subcontracting_receipt_item]
+	if missing_links:
+		frappe.throw(
+			_("Receipt Item {0} has allocation rows without saved SCR Item links: {1}.").format(
+				frappe.bold(receipt_item_key),
+				", ".join(str(idx) for idx in missing_links),
+			)
+		)
+	item_names = {row.subcontracting_receipt_item for row in allocations}
+	scr_names = {row.name for row in scr.items}
+	missing_items = sorted(item_names - scr_names)
+	if missing_items:
+		frappe.throw(
+			_("Saved SCR Item links do not belong to Subcontracting Receipt {0}: {1}.").format(
+				frappe.bold(scr.name),
+				", ".join(missing_items),
+			)
+		)
+	return item_names
+
+
+def _get_submitted_backed_scr(plr, receipt_item_key: str | None = None):
 	"""Return the submitted SCR proving the lot-backed receipt quantity."""
 	if not plr.subcontracting_receipt:
 		frappe.throw(
@@ -2912,22 +2957,38 @@ def _get_submitted_backed_scr(plr):
 			title=_("Invalid SCR Lineage"),
 		)
 
-	scr_qty = flt(sum(flt(row.qty) for row in scr.items), 3)
-	if scr_qty != flt(plr.lot_backed_qty, 3):
+	credit_source, receipt_item_key, precision = _get_material_credit_source(
+		plr,
+		receipt_item_key,
+	)
+	if receipt_item_key:
+		item_names = _get_v2_backed_scr_item_names(
+			plr,
+			scr,
+			receipt_item_key,
+		)
+		scr_qty = flt(
+			sum(flt(row.qty) for row in scr.items if row.name in item_names),
+			precision,
+		)
+	else:
+		scr_qty = flt(sum(flt(row.qty) for row in scr.items), precision)
+	if scr_qty != flt(credit_source.lot_backed_qty, precision):
 		frappe.throw(
 			_("Submitted SCR {0} quantity {1} must equal Lot Backed Qty {2}.").format(
 				frappe.bold(scr.name),
 				frappe.bold(scr_qty),
-				frappe.bold(flt(plr.lot_backed_qty, 3)),
+				frappe.bold(flt(credit_source.lot_backed_qty, precision)),
 			),
 			title=_("Backed SCR Quantity Does Not Match"),
 		)
 	return scr
 
 
-def _existing_material_credit_stock_entry(plr, pma) -> None:
+def _existing_material_credit_stock_entry(plr, pma, credit_source=None) -> None:
 	"""Block duplicates and repair links which only reference deleted records."""
-	plr_link = getattr(plr, "material_credit_stock_entry", None)
+	credit_source = credit_source or plr
+	plr_link = getattr(credit_source, "material_credit_stock_entry", None)
 	pma_link = pma.material_credit_stock_entry
 	if plr_link and pma_link and plr_link != pma_link:
 		frappe.throw(
@@ -2953,8 +3014,12 @@ def _existing_material_credit_stock_entry(plr, pma) -> None:
 
 	# Deleted or cancelled documents are not active ownership links.
 	frappe.db.set_value(
-		"Processor Lot Receipt",
-		plr.name,
+		(
+			"Processor Lot Receipt Item"
+			if credit_source is not plr
+			else "Processor Lot Receipt"
+		),
+		credit_source.name if credit_source is not plr else plr.name,
 		"material_credit_stock_entry",
 		None,
 		update_modified=False,
@@ -2980,8 +3045,39 @@ def _valuation_rates_match(
 	return flt(actual_rate, 2) == flt(expected_rate, 2)
 
 
-def _get_material_credit_valuation(plr, pma, scr) -> dict:
+def _get_material_credit_valuation(
+	plr,
+	pma,
+	scr,
+	receipt_item_key: str | None = None,
+) -> dict:
 	"""Derive component and processing rates from the submitted backed SCR."""
+	credit_source, receipt_item_key, precision = _get_material_credit_source(
+		plr,
+		receipt_item_key,
+	)
+	scr_item_names = None
+	supplied_item_names = None
+	if receipt_item_key:
+		scr_item_names = _get_v2_backed_scr_item_names(
+			plr,
+			scr,
+			receipt_item_key,
+		)
+		supplied_item_names = {
+			row.name
+			for row in scr.supplied_items or []
+			if row.reference_name in scr_item_names
+			and row.rm_item_code == pma.principal_component
+		}
+		if not supplied_item_names:
+			frappe.throw(
+				_("Receipt Item {0} has no principal-component supplied rows in SCR {1}.").format(
+					frappe.bold(receipt_item_key),
+					frappe.bold(scr.name),
+				),
+				title=_("SCR Valuation Evidence Missing"),
+			)
 	entries = frappe.get_all(
 		"Stock Ledger Entry",
 		filters={
@@ -2994,17 +3090,24 @@ def _get_material_credit_valuation(plr, pma, scr) -> dict:
 			"warehouse",
 			"actual_qty",
 			"stock_value_difference",
+			"voucher_detail_no",
 		],
 	)
 	finished = [
 		row for row in entries
-		if row.item_code == plr.processed_item and flt(row.actual_qty) > 0
+		if row.item_code == credit_source.processed_item
+		and flt(row.actual_qty) > 0
+		and (scr_item_names is None or row.voucher_detail_no in scr_item_names)
 	]
 	components = [
 		row for row in entries
 		if row.item_code == pma.principal_component
 		and row.warehouse == plr.supplier_warehouse
 		and flt(row.actual_qty) < 0
+		and (
+			supplied_item_names is None
+			or row.voucher_detail_no in supplied_item_names
+		)
 	]
 	if not finished or not components:
 		frappe.throw(
@@ -3034,10 +3137,10 @@ def _get_material_credit_valuation(plr, pma, scr) -> dict:
 	component_value = abs(
 		flt(sum(flt(row.stock_value_difference) for row in components), 6)
 	)
-	backed_qty = flt(plr.lot_backed_qty, 3)
+	backed_qty = flt(credit_source.lot_backed_qty, precision)
 	if (
-		flt(finished_qty, 3) != backed_qty
-		or flt(component_qty, 3) != backed_qty
+		flt(finished_qty, precision) != backed_qty
+		or flt(component_qty, precision) != backed_qty
 		or finished_value <= 0
 		or component_value <= 0
 	):
@@ -3046,7 +3149,7 @@ def _get_material_credit_valuation(plr, pma, scr) -> dict:
 			  "1:1 backed quantity of {1} {2}.").format(
 				frappe.bold(scr.name),
 				frappe.bold(backed_qty),
-				frappe.bold(plr.stock_uom),
+				frappe.bold(credit_source.stock_uom),
 			),
 			title=_("SCR Valuation Evidence Does Not Match"),
 		)
@@ -3062,7 +3165,10 @@ def _get_material_credit_valuation(plr, pma, scr) -> dict:
 			title=_("Invalid Material Credit Valuation"),
 		)
 
-	credit_qty = flt(plr.processor_material_credit_qty, 3)
+	credit_qty = flt(
+		credit_source.processor_material_credit_qty,
+		precision,
+	)
 	component_credit_value = flt(credit_qty * component_rate, 2)
 	processing_value = flt(credit_qty * processing_rate, 2)
 	return {
@@ -3118,21 +3224,51 @@ def validate_material_credit_stock_entry(doc, method=None) -> None:
 	if not plr_names and not pma_names:
 		return
 
-	if len(plr_names) != 1 or len(pma_names) != 1:
+	if len(pma_names) != 1:
 		frappe.throw(
 			_(
 				"Material Credit Stock Entry {0} must be linked to exactly one "
-				"Processor Lot Receipt and one Processor Material Account Entry."
+				"Processor Material Account Entry."
 			).format(frappe.bold(doc.name)),
 			title=_("Incomplete Material Credit Lineage"),
 		)
 
-	plr = frappe.get_doc("Processor Lot Receipt", plr_names[0])
 	pma = frappe.get_doc(
 		"Processor Material Account Entry",
 		pma_names[0],
 	)
-	credit_qty = flt(plr.processor_material_credit_qty, 3)
+	plr = frappe.get_doc(
+		"Processor Lot Receipt",
+		pma.processor_lot_receipt,
+	)
+	credit_source, receipt_item_key, precision = _get_material_credit_source(
+		plr,
+		pma.receipt_item_key,
+	)
+	credit_qty = flt(
+		credit_source.processor_material_credit_qty,
+		precision,
+	)
+	if receipt_item_key:
+		if plr_names:
+			frappe.throw(
+				_("A V2 item-specific Stock Entry cannot be owned by the PLR header."),
+				title=_("Invalid Material Credit Lineage"),
+			)
+		if credit_source.material_credit_stock_entry != doc.name:
+			frappe.throw(
+				_("Receipt Item {0} is not linked to Stock Entry {1}.").format(
+					frappe.bold(receipt_item_key),
+					frappe.bold(doc.name),
+				),
+				title=_("Incomplete Material Credit Lineage"),
+			)
+	else:
+		if plr_names != [plr.name]:
+			frappe.throw(
+				_("Legacy Material Credit Stock Entry must be linked to its PLR header."),
+				title=_("Incomplete Material Credit Lineage"),
+			)
 	if pma.processor_lot_receipt != plr.name or pma.docstatus != 1:
 		frappe.throw(
 			_(
@@ -3148,6 +3284,7 @@ def validate_material_credit_stock_entry(doc, method=None) -> None:
 	submitted_credit = _get_submitted_plr_material_credit(
 		plr,
 		credit_qty,
+		receipt_item_key=receipt_item_key,
 	)
 	if submitted_credit.name != pma.name:
 		frappe.throw(
@@ -3163,11 +3300,12 @@ def validate_material_credit_stock_entry(doc, method=None) -> None:
 			title=_("Material Credit Source Conflict"),
 		)
 
-	scr = _get_submitted_backed_scr(plr)
+	scr = _get_submitted_backed_scr(plr, receipt_item_key)
 	valuation = _get_material_credit_valuation(
 		plr=plr,
 		pma=pma,
 		scr=scr,
+		receipt_item_key=receipt_item_key,
 	)
 	processor_liability = _get_processor_material_account(
 		company=plr.company,
@@ -3220,9 +3358,9 @@ def validate_material_credit_stock_entry(doc, method=None) -> None:
 	if len(doc.items) == 1:
 		item = doc.items[0]
 		require(
-			item.item_code == plr.processed_item,
+			item.item_code == credit_source.processed_item,
 			_("Item must remain {0}.").format(
-				frappe.bold(plr.processed_item)
+				frappe.bold(credit_source.processed_item)
 			),
 		)
 		require(
@@ -3236,10 +3374,10 @@ def validate_material_credit_stock_entry(doc, method=None) -> None:
 			),
 		)
 		require(
-			flt(item.qty, 3) == credit_qty,
+			flt(item.qty, precision) == credit_qty,
 			_("Quantity must remain {0} {1}.").format(
 				frappe.bold(credit_qty),
-				frappe.bold(plr.stock_uom),
+				frappe.bold(credit_source.stock_uom),
 			),
 		)
 		require(
@@ -3349,6 +3487,7 @@ def unlink_material_credit_stock_entry(doc, method=None) -> None:
 	"""Clear PLR/PMA ownership when a Draft is deleted or SE is cancelled."""
 	for doctype in (
 		"Processor Lot Receipt",
+		"Processor Lot Receipt Item",
 		"Processor Material Account Entry",
 	):
 		for name in frappe.get_all(

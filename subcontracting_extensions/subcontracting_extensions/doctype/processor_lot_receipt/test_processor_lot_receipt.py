@@ -534,6 +534,7 @@ class TestProcessorLotReceipt(FrappeTestCase):
 		)
 		plr = SimpleNamespace(
 			name="PLR-TEST-CREDIT",
+			receipt_structure_version=controller.LEGACY_RECEIPT_STRUCTURE,
 			company="Test Company",
 			processed_item="Processed Item",
 			stock_uom="Kg",
@@ -541,12 +542,15 @@ class TestProcessorLotReceipt(FrappeTestCase):
 			lot_backed_qty=3900,
 			supplier_warehouse="Processor Warehouse",
 			subcontracting_receipt="SCR-TEST-BACKED",
+			material_credit_stock_entry="STE-TEST-CREDIT",
 		)
 		pma = SimpleNamespace(
 			name="PMA-TEST-CREDIT",
 			docstatus=1,
 			processor_lot_receipt=plr.name,
+			receipt_item_key=None,
 			principal_component="Principal Component",
+			material_credit_stock_entry="STE-TEST-CREDIT",
 		)
 		scr = SimpleNamespace(
 			name="SCR-TEST-BACKED",
@@ -661,6 +665,8 @@ class TestProcessorLotReceipt(FrappeTestCase):
 
 	def test_material_credit_valuation_is_derived_from_backed_scr(self):
 		plr = SimpleNamespace(
+			name="PLR-TEST-CREDIT",
+			receipt_structure_version=controller.LEGACY_RECEIPT_STRUCTURE,
 			processed_item="Processed Item",
 			supplier_warehouse="Processor Warehouse",
 			lot_backed_qty=3900,
@@ -707,6 +713,99 @@ class TestProcessorLotReceipt(FrappeTestCase):
 		self.assertEqual(valuation["component_value"], 10200.0)
 		self.assertEqual(valuation["processing_value"], 391.0)
 		self.assertEqual(valuation["total_value"], 10591.0)
+
+	def test_v2_material_credit_valuation_uses_exact_scr_lineage(self):
+		credit_item = frappe._dict(
+			name="PLR-ITEM-A",
+			item_key="ITEM-001",
+			processed_item="Finished A",
+			stock_uom="Kg",
+			lot_backed_qty=10,
+			processor_material_credit_qty=2,
+		)
+		plr = frappe._dict(
+			name="PLR-TEST-V2",
+			receipt_structure_version=controller.V2_RECEIPT_STRUCTURE,
+			supplier_warehouse="Processor Warehouse",
+			receipt_items=[credit_item],
+			lot_allocations=[
+				frappe._dict(
+					idx=1,
+					receipt_item_key="ITEM-001",
+					allocated_accepted_qty=10,
+					subcontracting_receipt_item="SCR-ITEM-A",
+				),
+			],
+		)
+		pma = frappe._dict(principal_component="Shared Component")
+		scr = frappe._dict(
+			name="SCR-TEST-V2",
+			items=[
+				frappe._dict(name="SCR-ITEM-A"),
+				frappe._dict(name="SCR-ITEM-B"),
+			],
+			supplied_items=[
+				frappe._dict(
+					name="SUPPLIED-A",
+					reference_name="SCR-ITEM-A",
+					rm_item_code="Shared Component",
+				),
+				frappe._dict(
+					name="SUPPLIED-B",
+					reference_name="SCR-ITEM-B",
+					rm_item_code="Shared Component",
+				),
+			],
+		)
+		ledger_rows = [
+			frappe._dict(
+				voucher_detail_no="SCR-ITEM-A",
+				item_code="Finished A",
+				warehouse="Finished Warehouse A",
+				actual_qty=10,
+				stock_value_difference=620,
+			),
+			frappe._dict(
+				voucher_detail_no="SCR-ITEM-B",
+				item_code="Finished B",
+				warehouse="Finished Warehouse B",
+				actual_qty=20,
+				stock_value_difference=1400,
+			),
+			frappe._dict(
+				voucher_detail_no="SUPPLIED-A",
+				item_code="Shared Component",
+				warehouse="Processor Warehouse",
+				actual_qty=-10,
+				stock_value_difference=-600,
+			),
+			frappe._dict(
+				voucher_detail_no="SUPPLIED-B",
+				item_code="Shared Component",
+				warehouse="Processor Warehouse",
+				actual_qty=-20,
+				stock_value_difference=-1200,
+			),
+		]
+
+		with patch.object(
+			controller.frappe,
+			"get_all",
+			return_value=ledger_rows,
+		):
+			valuation = controller._get_material_credit_valuation(
+				plr=plr,
+				pma=pma,
+				scr=scr,
+				receipt_item_key="ITEM-001",
+			)
+
+		self.assertEqual(valuation["target_warehouse"], "Finished Warehouse A")
+		self.assertEqual(valuation["component_rate"], 60.0)
+		self.assertEqual(valuation["processing_rate"], 2.0)
+		self.assertEqual(valuation["component_value"], 120.0)
+		self.assertEqual(valuation["processing_value"], 4.0)
+		self.assertEqual(valuation["total_value"], 124.0)
 
 	def test_valid_controlled_material_credit_stock_entry(self):
 		plr, pma, scr, valuation, stock_entry = (
@@ -789,6 +888,7 @@ class TestProcessorLotReceipt(FrappeTestCase):
 			"get_all",
 			side_effect=[
 				["PLR-TEST-CREDIT"],
+				[],
 				["PMA-TEST-CREDIT"],
 			],
 		), patch.object(
