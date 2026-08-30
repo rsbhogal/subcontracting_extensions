@@ -4,3 +4,4 @@
 
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
+subcontracting_extensions.patches.v2_0.backfill_processor_lot_receipt_items
