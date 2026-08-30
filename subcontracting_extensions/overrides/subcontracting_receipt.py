@@ -328,6 +328,124 @@ def _get_plr_invoice_qty_by_purchase_order(source_doc):
 	return invoice_qty_by_po
 
 
+def _get_plr_invoice_qty_by_scr_item(source_doc):
+	"""Return commercial quantity keyed by exact SCR Item identity.
+
+	Legacy receipts retain their proven Purchase Order-level calculation. V2
+	receipts resolve every allocation through its persisted SCR Item and exact
+	SCO Item / PO Item lineage, so several items may safely share one PO.
+	"""
+	plr_name = source_doc.get("custom_processor_lot_receipt")
+	if not plr_name:
+		return None
+
+	if not frappe.db.exists("Processor Lot Receipt", plr_name):
+		frappe.throw(
+			_("Subcontracting Receipt {0} refers to missing Processor Lot Receipt {1}.").format(
+				frappe.bold(source_doc.name),
+				frappe.bold(plr_name),
+			),
+			title=_("Processor Lot Receipt Link Broken"),
+		)
+
+	plr = frappe.get_doc("Processor Lot Receipt", plr_name)
+	if plr.receipt_structure_version != "V2 Itemized":
+		invoice_qty_by_po = _get_plr_invoice_qty_by_purchase_order(source_doc)
+		return {
+			item.name: flt(invoice_qty_by_po[item.purchase_order])
+			for item in source_doc.items
+			if item.purchase_order
+		}
+
+	if plr.subcontracting_receipt and plr.subcontracting_receipt != source_doc.name:
+		frappe.throw(
+			_("Processor Lot Receipt {0} is linked to Subcontracting Receipt {1}, not {2}.").format(
+				frappe.bold(plr.name),
+				frappe.bold(plr.subcontracting_receipt),
+				frappe.bold(source_doc.name),
+			),
+			title=_("Subcontracting Receipt Link Mismatch"),
+		)
+
+	credit_items = [
+		item.item_key
+		for item in plr.receipt_items or []
+		if flt(item.material_credit_invoice_qty) > 0
+	]
+	if credit_items:
+		frappe.throw(
+			_("V2 commercial mapping is not yet enabled for billed Material Credit on: {0}.").format(
+				", ".join(credit_items)
+			),
+			title=_("V2 Material Credit Not Yet Enabled"),
+		)
+
+	scr_items_by_name = {
+		item.name: item
+		for item in source_doc.items
+		if item.purchase_order
+	}
+	invoice_qty_by_scr_item = {}
+
+	for allocation in plr.lot_allocations or []:
+		if not allocation.subcontracting_receipt_item:
+			frappe.throw(
+				_("Allocation row {0} has no Subcontracting Receipt Item link.").format(
+					allocation.idx
+				),
+				title=_("SCR Item Link Missing"),
+			)
+
+		scr_item = scr_items_by_name.get(allocation.subcontracting_receipt_item)
+		if not scr_item:
+			frappe.throw(
+				_("Allocation row {0} refers to SCR Item {1}, which is not in {2}.").format(
+					allocation.idx,
+					frappe.bold(allocation.subcontracting_receipt_item),
+					frappe.bold(source_doc.name),
+				),
+				title=_("SCR Item Link Broken"),
+			)
+
+		if (
+			scr_item.purchase_order_item != allocation.purchase_order_item
+			or scr_item.subcontracting_order_item
+			!= allocation.subcontracting_order_item
+		):
+			frappe.throw(
+				_("Allocation row {0} and SCR Item {1} have different order-item lineage.").format(
+					allocation.idx,
+					frappe.bold(scr_item.name),
+				),
+				title=_("SCR Item Lineage Mismatch"),
+			)
+
+		if scr_item.name in invoice_qty_by_scr_item:
+			frappe.throw(
+				_("SCR Item {0} is represented by more than one allocation.").format(
+					frappe.bold(scr_item.name)
+				),
+				title=_("Duplicate SCR Item Allocation"),
+			)
+
+		invoice_qty_by_scr_item[scr_item.name] = flt(
+			allocation.allocated_invoice_qty
+		)
+
+	missing_scr_items = sorted(
+		set(scr_items_by_name) - set(invoice_qty_by_scr_item)
+	)
+	if missing_scr_items:
+		frappe.throw(
+			_("No PLR allocation was found for SCR Items: {0}.").format(
+				", ".join(frappe.bold(name) for name in missing_scr_items)
+			),
+			title=_("PLR and SCR Items Do Not Match"),
+		)
+
+	return invoice_qty_by_scr_item
+
+
 def _set_mapped_pr_posting_date(
 	purchase_receipt,
 	subcontracting_receipt,
@@ -364,8 +482,8 @@ def make_purchase_receipt(
 	if source_doc.is_return:
 		return
 
-	commercial_qty_by_po = (
-		_get_plr_invoice_qty_by_purchase_order(
+	commercial_qty_by_scr_item = (
+		_get_plr_invoice_qty_by_scr_item(
 			source_doc
 		)
 	)
@@ -401,11 +519,11 @@ def make_purchase_receipt(
 			"purchase_order": item.purchase_order,
 			"qty": (
 				flt(
-					commercial_qty_by_po[
-						item.purchase_order
+					commercial_qty_by_scr_item[
+						item.name
 					]
 				)
-				if commercial_qty_by_po is not None
+				if commercial_qty_by_scr_item is not None
 				else flt(item.qty)
 			),
 			"rejected_qty": flt(item.rejected_qty),

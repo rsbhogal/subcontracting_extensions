@@ -133,13 +133,13 @@ class TestSubcontractingReceiptPurchaseReceiptMapping(
 
 		return target_doc
 
-	def _map_purchase_receipt(self, commercial_qty_by_po):
+	def _map_purchase_receipt(self, commercial_qty_by_scr_item):
 		source_scr = self._source_scr()
 
 		with patch.object(
 			controller,
-			"_get_plr_invoice_qty_by_purchase_order",
-			return_value=commercial_qty_by_po,
+			"_get_plr_invoice_qty_by_scr_item",
+			return_value=commercial_qty_by_scr_item,
 		), patch.object(
 			controller,
 			"_validate_shared_taxes",
@@ -253,7 +253,7 @@ class TestSubcontractingReceiptPurchaseReceiptMapping(
 	def test_plr_linked_scr_maps_commercial_quantity_and_amount(self):
 		purchase_receipt = self._map_purchase_receipt(
 			{
-				"PO-TEST-COMMERCIAL": 4030,
+				"SCR-ITEM-TEST": 4030,
 			}
 		)
 
@@ -268,6 +268,67 @@ class TestSubcontractingReceiptPurchaseReceiptMapping(
 		self.assertEqual(purchase_receipt.net_total, 9269)
 		self.assertTrue(purchase_receipt.calculated)
 		self.assertFalse(purchase_receipt.saved)
+
+	def test_v2_commercial_quantity_is_keyed_by_exact_scr_item(self):
+		source_scr = self._source_scr()
+		source_scr.items.append(
+			AttributeObject(
+				name="SCR-ITEM-SECOND",
+				idx=2,
+				purchase_order="PO-TEST-COMMERCIAL",
+				purchase_order_item="PO-ITEM-SECOND",
+				subcontracting_order_item="SCO-ITEM-SECOND",
+				qty=20,
+				rejected_qty=0,
+				warehouse="Finished Goods Warehouse - TEST",
+				rejected_warehouse=None,
+			)
+		)
+		source_scr.items[0].subcontracting_order_item = "SCO-ITEM-TEST"
+
+		plr = AttributeObject(
+			name="PLR-TEST-COMMERCIAL",
+			receipt_structure_version="V2 Itemized",
+			subcontracting_receipt="SCR-TEST-COMMERCIAL",
+			receipt_items=[],
+			lot_allocations=[
+				AttributeObject(
+					idx=1,
+					subcontracting_receipt_item="SCR-ITEM-TEST",
+					purchase_order_item="PO-ITEM-TEST",
+					subcontracting_order_item="SCO-ITEM-TEST",
+					allocated_invoice_qty=49,
+				),
+				AttributeObject(
+					idx=2,
+					subcontracting_receipt_item="SCR-ITEM-SECOND",
+					purchase_order_item="PO-ITEM-SECOND",
+					subcontracting_order_item="SCO-ITEM-SECOND",
+					allocated_invoice_qty=18,
+				),
+			],
+		)
+
+		with patch.object(
+			controller.frappe.db,
+			"exists",
+			return_value=True,
+		), patch.object(
+			controller.frappe,
+			"get_doc",
+			return_value=plr,
+		):
+			result = controller._get_plr_invoice_qty_by_scr_item(
+				source_scr
+			)
+
+		self.assertEqual(
+			result,
+			{
+				"SCR-ITEM-TEST": 49.0,
+				"SCR-ITEM-SECOND": 18.0,
+			},
+		)
 
 	def test_ordinary_scr_retains_physical_quantity_mapping(self):
 		purchase_receipt = self._map_purchase_receipt(None)
