@@ -4,11 +4,16 @@
 frappe.ui.form.on("Processor Lot Receipt", {
     refresh(frm) {
         if (frm.doc.__v2_entry_preview) {
+            frappe.subcontracting_entry_preview.restore_draft(frm);
             frappe.subcontracting_entry_preview.render(frm);
             return;
         }
         if (frappe.subcontracting_entry_preview) {
             frappe.subcontracting_entry_preview.restore(frm);
+            if (is_processor_first_receipt(frm)) {
+                return frappe.subcontracting_entry_preview.render_draft(frm);
+            }
+            frappe.subcontracting_entry_preview.restore_draft(frm);
         }
         clear_unlinked_stock_uom_default(frm);
         calculate_physical_weights(frm);
@@ -24,6 +29,7 @@ frappe.ui.form.on("Processor Lot Receipt", {
     },
 
     after_save(frm) {
+        if (is_processor_first_receipt(frm)) return;
         prompt_to_refresh_stale_draft_scr(frm);
     },
 
@@ -31,19 +37,25 @@ frappe.ui.form.on("Processor Lot Receipt", {
         if (frm.doc.__v2_entry_preview) {
             frappe.throw(__("Workspace preview only. Saving is not enabled in this checkpoint."));
         }
+        if (is_processor_first_receipt(frm)) {
+            frappe.subcontracting_entry_preview.validate_draft(frm);
+        }
     },
 
     supplier_gross_weight(frm) {
+        if (is_processor_first_receipt(frm)) return;
         calculate_physical_weights(frm);
         calculate_commercial_reconciliation(frm);
     },
 
     supplier_tare_weight(frm) {
+        if (is_processor_first_receipt(frm)) return;
         calculate_physical_weights(frm);
         calculate_commercial_reconciliation(frm);
     },
 
     company_gross_weight(frm) {
+        if (is_processor_first_receipt(frm)) return;
         calculate_physical_weights(frm);
         calculate_commercial_reconciliation(frm);
         toggle_measurement_fields(frm);
@@ -51,6 +63,7 @@ frappe.ui.form.on("Processor Lot Receipt", {
     },
 
     company_tare_weight(frm) {
+        if (is_processor_first_receipt(frm)) return;
         calculate_physical_weights(frm);
         calculate_commercial_reconciliation(frm);
         toggle_measurement_fields(frm);
@@ -58,6 +71,7 @@ frappe.ui.form.on("Processor Lot Receipt", {
     },
 
     company_weighment_uom(frm) {
+        if (is_processor_first_receipt(frm)) return;
         calculate_physical_weights(frm);
         calculate_commercial_reconciliation(frm);
         toggle_measurement_fields(frm);
@@ -65,6 +79,7 @@ frappe.ui.form.on("Processor Lot Receipt", {
     },
 
     measurement_method(frm) {
+        if (is_processor_first_receipt(frm)) return;
         toggle_measurement_fields(frm);
         calculate_physical_weights(frm);
         calculate_commercial_reconciliation(frm);
@@ -73,13 +88,19 @@ frappe.ui.form.on("Processor Lot Receipt", {
 
 
     company_accepted_qty(frm) {
+        if (is_processor_first_receipt(frm)) return;
         calculate_commercial_reconciliation(frm);
     },
 
     processor_lot(frm) {
+        if (is_processor_first_receipt(frm)) return;
         fetch_processor_lot_receipt_context(frm);
     },
 });
+
+function is_processor_first_receipt(frm) {
+    return frm.doc.receipt_structure_version === "V2 Itemized" && !frm.doc.processor_lot;
+}
 
 /**
  * Lock physical receipt facts once an active SCR is linked.

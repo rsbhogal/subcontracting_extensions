@@ -30,6 +30,12 @@ V2_RECEIPT_STRUCTURE = "V2 Itemized"
 ITEM_QUANTITY_PRECISION = 6
 
 
+def _block_processor_first_downstream(plr) -> None:
+	"""J2 drafts may not start a downstream transaction through these actions."""
+	if getattr(plr, "processor_first_draft_only", 0):
+		frappe.throw(_("This processor-first receipt is a draft-entry checkpoint. Downstream document creation is not enabled yet."))
+
+
 def _calculate_material_credit_invoice_qty(
 	invoice_qty: float,
 	lot_backed_qty: float,
@@ -150,6 +156,7 @@ class ProcessorLotReceipt(Document):
 				self._set_header_from_processor_lot()
 			else:
 				self._validate_processor_first_context()
+				self.processor_first_draft_only = 1
 			self._prepare_v2_receipt_items()
 			self._calculate_v2_truck_differentials()
 			self._calculate_v2_item_commercial_reconciliation()
@@ -179,6 +186,8 @@ class ProcessorLotReceipt(Document):
 			self._validate_v2_allocations()
 			self._validate_v2_material_credit()
 			self._validate_v2_linked_scr_consistency()
+			if getattr(self, "processor_first_draft_only", 0):
+				self._validate_processor_first_draft_checkpoint()
 			return
 
 		if not self.processor_lot:
@@ -210,8 +219,8 @@ class ProcessorLotReceipt(Document):
 	def _validate_processor_first_context(self) -> None:
 		"""Validate the opt-in, headerless V2 draft without choosing a lot.
 
-		This checkpoint does not enable the browser form. Its existing preview
-		marker remains unsaveable. Supplier invoice identity also remains PI-owned.
+		The existing preview marker remains unsaveable. Supplier invoice identity
+		also remains PI-owned; J2 only enables fully lot-backed draft entry.
 		"""
 		if not cint(frappe.conf.get("v2_processor_first_draft_entry")):
 			frappe.throw(_("Processor-first draft entry is not enabled on this site."))
@@ -253,6 +262,17 @@ class ProcessorLotReceipt(Document):
 			item_doc.check_permission("read")
 			if item_doc.get("disabled"):
 				frappe.throw(_("Receipt Items cannot contain a disabled Item."))
+
+	def _validate_processor_first_draft_checkpoint(self) -> None:
+		"""Limit J2 to positive, entirely lot-backed drafts with no document flow."""
+		from subcontracting_extensions.receipt_entry_preview import assert_draft_unlinked
+
+		assert_draft_unlinked(self)
+		for item in self.receipt_items or []:
+			if flt(item.company_accepted_qty, ITEM_QUANTITY_PRECISION) <= 0:
+				frappe.throw(_("Every item needs a positive Company Accepted Qty before draft saving."))
+			if flt(item.processor_material_credit_qty, ITEM_QUANTITY_PRECISION) > 0:
+				frappe.throw(_("J2 supports fully lot-backed drafts only. Reduce the quantity or resolve lot capacity; material-credit processing is a later checkpoint."))
 
 	def _validate_receipt_structure_immutability(self) -> None:
 		"""Prevent a saved legacy or V2 receipt changing data contracts."""
@@ -2114,6 +2134,7 @@ def create_material_credit_record(
 		"Processor Lot Receipt",
 		processor_lot_receipt,
 	)
+	_block_processor_first_downstream(plr)
 	if not frappe.has_permission(
 		"Processor Lot Receipt",
 		"write",
@@ -2459,6 +2480,8 @@ def refresh_draft_subcontracting_receipt(
         processor_lot_receipt,
     )
 
+    _block_processor_first_downstream(plr)
+
     existing_scr = plr.subcontracting_receipt
 
     if not existing_scr:
@@ -2579,6 +2602,7 @@ def refresh_draft_subcontracting_receipt(
 
 def _validate_scr_creation(processor_lot_receipt) -> None:
 	"""Validate that the PLR is ready to create its SCR."""
+	_block_processor_first_downstream(processor_lot_receipt)
 	if processor_lot_receipt.is_new():
 		frappe.throw(
 			_("Please save the Processor Lot Receipt first.")
@@ -2751,6 +2775,7 @@ def create_material_credit_stock_entry(
 		"Processor Lot Receipt",
 		processor_lot_receipt,
 	)
+	_block_processor_first_downstream(plr)
 	if plr.is_new() or plr.docstatus == 2:
 		frappe.throw(
 			_("A saved, active Processor Lot Receipt is required."),

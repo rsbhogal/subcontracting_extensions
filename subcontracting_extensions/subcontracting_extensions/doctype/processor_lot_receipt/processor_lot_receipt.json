@@ -6,6 +6,8 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "processor_first_draft_html",
+  "processor_first_draft_only",
   "document_reference_section",
   "subcontracting_receipt",
   "purchase_receipt",
@@ -77,6 +79,20 @@
   "processed_item"
  ],
  "fields": [
+  {
+   "fieldname": "processor_first_draft_html",
+   "fieldtype": "HTML",
+   "hidden": 1,
+   "label": "Processor-first Draft Entry"
+  },
+  {
+   "fieldname": "processor_first_draft_only",
+   "fieldtype": "Check",
+   "default": "0",
+   "hidden": 1,
+   "read_only": 1,
+   "label": "Processor-first Draft Checkpoint"
+  },
   {
    "fieldname": "document_reference_section",
    "fieldtype": "Section Break",
