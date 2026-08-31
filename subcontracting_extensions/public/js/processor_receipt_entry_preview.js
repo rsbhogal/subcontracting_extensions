@@ -283,12 +283,11 @@ frappe.provide("frappe.subcontracting_entry_preview");
                 ${items.some(item => item.measurement_basis === "Truck Differential Weight") || doc.item_weighments?.length ? `
                     <h4 class="mt-4">${escape(__("Truck Weighments"))}</h4>
                     <p>${escape(__("Record Arrival Loaded once, followed by After Unloading for each item. The last unloading reading may be the truck tare. Count items do not use these readings. Repeated readings for one weight item are allowed."))}</p>
-                    ${button("add_weighment", "Add Weighment")}
+                    ${button("weighments", "Record / Edit Truck Weighments")}
                     <div class="table-responsive mt-2"><table class="table table-bordered table-sm">
-                        <thead><tr><th>${escape(__("Stage / Time"))}</th><th>${escape(__("Item Key"))}</th><th>${escape(__("Scale Weight"))}</th><th>${escape(__("Adjustment"))}</th><th>${escape(__("Derived Accepted"))}</th><th></th></tr></thead>
+                        <thead><tr><th>${escape(__("Stage / Time"))}</th><th>${escape(__("Item Key"))}</th><th>${escape(__("Scale Weight"))}</th><th>${escape(__("Adjustment"))}</th><th>${escape(__("Derived Accepted"))}</th></tr></thead>
                         <tbody>${(doc.item_weighments || []).map((row, index) => `<tr><td>${escape(row.weighment_stage)}<br>${escape(row.weighment_date)} ${escape(row.weighment_time || "")}</td><td>${escape(row.receipt_item_key || "—")}</td>
-                            <td>${quantity(row.scale_weight)} ${escape(row.measurement_uom)}</td><td>${quantity(row.adjustment_qty)}</td><td>${quantity(row.accepted_qty)}</td>
-                            <td>${button("weighment", "Edit", index)} ${button("remove_weighment", "Remove", index)}</td></tr>`).join("")}</tbody>
+                            <td>${quantity(row.scale_weight)} ${escape(row.measurement_uom)}</td><td>${quantity(row.adjustment_qty)}</td><td>${quantity(row.accepted_qty)}</td></tr>`).join("")}</tbody>
                     </table></div>` : ""}
                 <h4 class="mt-4">${escape(__("Lot Allocations"))}</h4>
                 ${button("review", "Review FIFO Allocations")}
@@ -308,15 +307,7 @@ frappe.provide("frappe.subcontracting_entry_preview");
             const index = Number(this.dataset.index);
             if (action === "facts") edit_facts(frm);
             if (action === "item") edit_item(frm, index);
-            if (action === "add_weighment") edit_weighment(frm, null);
-            if (action === "weighment") edit_weighment(frm, index);
-            if (action === "remove_weighment") {
-                frappe.confirm(__("Remove this weighment from the draft?"), () => {
-                    doc.item_weighments.splice(index, 1);
-                    doc.item_weighments.forEach((row, i) => row.idx = i + 1);
-                    changed(frm);
-                });
-            }
+            if (action === "weighments") api.edit_weighments(frm);
             if (action === "review") review_draft(frm);
         });
     }
@@ -374,50 +365,179 @@ frappe.provide("frappe.subcontracting_entry_preview");
         dialog.show(); update_accepted();
     }
 
-    function edit_weighment(frm, index) {
-        const row = index === null ? {} : frm.doc.item_weighments[index];
-        const items = frm.doc.receipt_items.filter(item => item.measurement_basis === "Truck Differential Weight");
-        const stage = row.weighment_stage || ((frm.doc.item_weighments || []).length ? "After Unloading" : "Arrival Loaded");
-        let dialog;
-        dialog = new frappe.ui.Dialog({title: __("Truck Weighment"), fields: [
-            {fieldname: "weighment_stage", fieldtype: "Select", label: __("Stage"), options: "Arrival Loaded\nAfter Unloading", default: stage, reqd: 1,
-                onchange: () => update_item()},
-            {fieldname: "receipt_item_key", fieldtype: "Select", label: __("Item Just Unloaded"),
-                options: ["", ...items.map(item => item.item_key)], default: row.receipt_item_key, onchange: () => update_uom()},
-            {fieldname: "weighment_date", fieldtype: "Date", label: __("Date"), reqd: 1, default: row.weighment_date || frm.doc.physical_receipt_date},
-            {fieldname: "weighment_time", fieldtype: "Time", label: __("Time"), default: row.weighment_time},
-            {fieldname: "scale_weight", fieldtype: "Data", label: __("Scale Weight"), reqd: 1, default: quantity(row.scale_weight)},
-            {fieldname: "measurement_uom", fieldtype: "Link", options: "UOM", label: __("Scale UOM"), read_only: 1, reqd: 1,
-                default: row.measurement_uom || items[0]?.stock_uom},
-            {fieldname: "adjustment_qty", fieldtype: "Data", label: __("Adjustment (+/−)"), default: quantity(row.adjustment_qty)},
-            {fieldname: "adjustment_reason", fieldtype: "Small Text", label: __("Adjustment Reason"), default: row.adjustment_reason},
-            {fieldname: "weighbridge", fieldtype: "Data", label: __("Weighbridge"), default: row.weighbridge},
-            {fieldname: "slip_number", fieldtype: "Data", label: __("Slip Number"), default: row.slip_number},
-        ], primary_action_label: __("Apply to Draft"), primary_action(values) {
-            const arrival = values.weighment_stage === "Arrival Loaded";
-            const scale = numeric(values.scale_weight, row.scale_weight, 3);
-            const adjustment = arrival ? 0 : numeric(values.adjustment_qty || "0", row.adjustment_qty, 3, true);
-            if (!arrival && !values.receipt_item_key) frappe.throw(__("Select the item just unloaded."));
-            if (adjustment && !(values.adjustment_reason || "").trim()) frappe.throw(__("Explain the weighment adjustment."));
-            const target = index === null ? frm.add_child("item_weighments") : row;
-            Object.assign(target, values, {scale_weight: scale, adjustment_qty: adjustment,
-                receipt_item_key: arrival ? null : values.receipt_item_key});
+    // Pure sequence validation also powers local previews and no-record tests.
+    // Work on copies so closing the dialog never changes the form.
+    api.prepare_weighments = function (readings, items) {
+        const rows = JSON.parse(JSON.stringify(readings));
+        const eligible = new Map(items.filter(item => item.measurement_method === "Weight"
+            && item.measurement_basis === "Truck Differential Weight").map(item => [item.item_key, item]));
+        const number = (value, signed = false) => {
+            const text = String(value ?? "").trim();
+            if (!(signed ? /^-?\d+(?:\.\d{1,3})?$/ : /^\d+(?:\.\d{1,3})?$/).test(text)
+                || !Number.isFinite(Number(text))) throw new Error(__("Enter scale weights and adjustments with at most three decimals."));
+            return Number(text);
+        };
+        if (!rows.length) throw new Error(__("Enter an Arrival Loaded reading first."));
+        if (rows.length > 200) throw new Error(__("At most 200 weighment readings are supported."));
+        let previous_weight;
+        let previous_moment;
+        const uom = rows[0].measurement_uom;
+        if (!uom) throw new Error(__("Scale UOM is required."));
+        for (const [index, row] of rows.entries()) {
+            const expected = index ? "After Unloading" : "Arrival Loaded";
+            if (row.weighment_stage !== expected) throw new Error(__("Use one Arrival Loaded reading followed by After Unloading readings."));
+            const day = String(row.weighment_date || "");
+            const date = new Date(`${day}T00:00:00Z`);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(date.getTime())
+                || date.toISOString().slice(0, 10) !== day) throw new Error(__("Every reading needs a valid date."));
+            const clock = String(row.weighment_time || "00:00:00");
+            if (!/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,6})?)?$/.test(clock)) {
+                throw new Error(__("Use a valid 24-hour time for each reading."));
+            }
+            const [hours, minutes, seconds = "0"] = clock.split(":");
+            const moment = date.getTime() * 1000 + Math.round((Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds)) * 1000000);
+            if (previous_moment !== undefined && moment < previous_moment) throw new Error(__("Reading times must be chronological; a blank time means midnight."));
+            if (row.measurement_uom !== uom) throw new Error(__("All readings must use the same Scale UOM."));
+            const scale = number(row.scale_weight);
+            const adjustment = number(row.adjustment_qty ?? 0, true);
+            if (!index && adjustment) throw new Error(__("Arrival Loaded cannot have an unloading adjustment."));
+            if (index && scale > previous_weight) throw new Error(__("A scale reading cannot exceed the preceding weight."));
+            if (adjustment && !String(row.adjustment_reason || "").trim()) throw new Error(__("Explain every non-zero adjustment."));
+            const item = index ? eligible.get(row.receipt_item_key) : null;
+            if (index && !item) throw new Error(__("Select a truck-differential Weight item for each unloading."));
+            if (item && item.stock_uom !== uom) throw new Error(__("The unloaded item's Stock UOM must match the Scale UOM."));
+            const derived = index ? Number((previous_weight - scale).toFixed(3)) : 0;
+            const accepted = Number((derived + adjustment).toFixed(3));
+            if (accepted < 0) throw new Error(__("An adjustment cannot make Accepted Qty negative."));
+            Object.assign(row, {scale_weight: scale, adjustment_qty: adjustment,
+                receipt_item_key: item ? item.item_key : null, processed_item: item ? item.processed_item : null,
+                derived_unloaded_qty: derived, accepted_qty: accepted});
+            previous_weight = scale; previous_moment = moment;
+        }
+        return rows;
+    };
+
+    api.edit_weighments = function (frm) {
+        if (!frm.__j2_state?.enabled || frm.__j2_state.busy || is_linked(frm)) return;
+        const origin = signature(frm);
+        const state = frm.__j2_state;
+        const items = frm.doc.receipt_items.filter(item => item.measurement_method === "Weight"
+            && item.measurement_basis === "Truck Differential Weight");
+        const source = frm.doc.item_weighments || [];
+        const rows = JSON.parse(JSON.stringify(source));
+        const initial_uom = rows[0]?.measurement_uom || items[0]?.stock_uom || "";
+        const new_row = (arrival, day, bridge, uom) => ({
+            weighment_stage: arrival ? "Arrival Loaded" : "After Unloading",
+            receipt_item_key: !arrival && items.length === 1 ? items[0].item_key : null,
+            weighment_date: day, weighment_time: "", weighbridge: bridge || "", slip_number: "",
+            measurement_uom: uom, scale_weight: "", adjustment_qty: 0, adjustment_reason: "",
+        });
+        if (!rows.length) {
+            rows.push(new_row(true, frm.doc.physical_receipt_date, "", initial_uom));
+            rows.push(new_row(false, frm.doc.physical_receipt_date, "", initial_uom));
+        }
+        const dialog = new frappe.ui.Dialog({title: __("Truck Weighments — Consecutive Pairs"), size: "extra-large", fields: [
+            {fieldname: "new_date", fieldtype: "Date", label: __("Date for New Readings"), default: rows[rows.length - 1].weighment_date},
+            {fieldname: "new_bridge", fieldtype: "Data", label: __("Weighbridge for New Readings"), default: rows[rows.length - 1].weighbridge},
+            {fieldname: "new_uom", fieldtype: "Select", label: __("Scale UOM for New Readings"),
+                options: Array.from(new Set([initial_uom, ...items.map(item => item.stock_uom)].filter(Boolean))), default: initial_uom},
+            {fieldname: "readings", fieldtype: "HTML"},
+        ], primary_action_label: __("Apply Weighments"), primary_action() {
+            if (frm.__j2_state !== state || !state.enabled || state.busy || is_linked(frm) || signature(frm) !== origin) {
+                frappe.throw(__("The receipt changed while this dialog was open. Close it and reopen Truck Weighments."));
+            }
+            let prepared;
+            try { prepared = rows.length ? api.prepare_weighments(rows, items) : []; }
+            catch (error) { frappe.throw(error.message); }
+            // Validation completes before any form mutation. Keep existing row
+            // objects/names, including audit details not edited in this dialog.
+            const existing = new Map(source.map(row => [row.name, row]));
+            frm.doc.item_weighments = [];
+            prepared.forEach((values, index) => {
+                let target = values.name && existing.get(values.name);
+                if (target) frm.doc.item_weighments.push(target);
+                else target = frm.add_child("item_weighments");
+                Object.assign(target, values, {idx: index + 1});
+            });
             dialog.hide(); changed(frm);
         }});
-        function update_item() {
-            if (!dialog) return;
-            const arrival = dialog.get_value("weighment_stage") === "Arrival Loaded";
-            dialog.set_df_property("receipt_item_key", "hidden", arrival);
-            dialog.set_df_property("receipt_item_key", "reqd", !arrival);
-            dialog.set_df_property("adjustment_qty", "read_only", arrival);
+        const wrapper = dialog.fields_dict.readings.$wrapper;
+        const input = (row, index, field, type = "text") => {
+            const numeric_field = ["scale_weight", "adjustment_qty"].includes(field);
+            const raw = row[field];
+            const value = numeric_field && /^-?\d+(?:\.\d{1,3})?$/.test(String(raw ?? "")) && Number.isFinite(Number(raw)) ? quantity(raw) : (raw || "");
+            return `<input class="form-control input-sm" type="${type}" ${type === "time" ? 'step="0.000001"' : ""}
+                data-reading="${index}" data-field="${field}" aria-label="${escape(field)}" value="${escape(value)}"
+                ${numeric_field ? 'inputmode="decimal"' : ""}>`;
+        };
+        function paint() {
+            wrapper.html(`<p>${escape(__("Arrival is entered once. Each unloading pairs its new weight with the previous reading automatically. Defaults above apply only to newly added readings. Closing without Apply leaves the draft unchanged."))}</p>
+                <div class="table-responsive"><table class="table table-bordered table-sm">
+                <thead><tr><th>${escape(__("Reading / Item Unloaded"))}</th><th>${escape(__("Previous Weight"))}</th><th>${escape(__("New Scale Weight"))}</th>
+                <th>${escape(__("Adjustment"))}</th><th>${escape(__("Accepted Preview"))}</th><th></th></tr></thead>
+                <tbody>${rows.map((row, index) => `<tr>
+                    <td>${index ? `${index}. ${escape(__("After Unloading"))}<select class="form-control input-sm" data-reading="${index}" data-field="receipt_item_key" aria-label="${escape(__("Item unloaded"))}">
+                        <option value=""></option>${items.map(item => `<option value="${escape(item.item_key)}" ${item.item_key === row.receipt_item_key ? "selected" : ""}>${escape(item.item_key)} · ${escape(item.processed_item)}</option>`).join("")}
+                        ${row.receipt_item_key && !items.some(item => item.item_key === row.receipt_item_key) ? `<option value="${escape(row.receipt_item_key)}" selected>${escape(row.receipt_item_key)} (${escape(__("not eligible"))})</option>` : ""}</select>` : `<strong>${escape(__("Arrival Loaded"))}</strong>`}
+                        <small>${escape(row.measurement_uom || "—")}</small></td>
+                    <td data-previous="${index}">—</td><td>${input(row, index, "scale_weight")}</td>
+                    <td>${index ? input(row, index, "adjustment_qty") : "0.000"}</td><td data-accepted="${index}">—</td>
+                    <td>${index ? `<button type="button" class="btn btn-default btn-xs" data-remove-reading="${index}">${escape(__("Remove"))}</button>` : ""}</td></tr>
+                    <tr><td colspan="6"><div class="row">
+                        <div class="col-sm-3"><label>${escape(__("Date"))}</label>${input(row, index, "weighment_date", "date")}</div>
+                        <div class="col-sm-3"><label>${escape(__("Time"))}</label>${input(row, index, "weighment_time", "time")}</div>
+                        <div class="col-sm-3"><label>${escape(__("Weighbridge"))}</label>${input(row, index, "weighbridge")}</div>
+                        <div class="col-sm-3"><label>${escape(__("Slip Reference"))}</label>${input(row, index, "slip_number")}</div>
+                    </div>${index ? `<label>${escape(__("Adjustment Reason"))}</label>${input(row, index, "adjustment_reason")}` : ""}</td></tr>`).join("")}
+                </tbody></table></div>
+                <button type="button" class="btn btn-default btn-sm" data-add-reading>${escape(__("Add Reading"))}</button>
+                <button type="button" class="btn btn-default btn-sm" data-clear-readings>${escape(__("Clear Readings"))}</button>
+                <p class="mt-2" data-sequence-status role="status"></p>
+                <p class="text-muted">${escape(__("These are previews only. After Apply, Review FIFO Allocations again before Save. You can apply partial readings to the open draft, but saving still requires complete valid measurements."))}</p>`);
+            preview();
         }
-        function update_uom() {
-            if (!dialog) return;
-            const item = items.find(item => item.item_key === dialog.get_value("receipt_item_key"));
-            if (item) dialog.set_value("measurement_uom", item.stock_uom);
+        function preview() {
+            if (!rows.length) {
+                wrapper.find("[data-sequence-status]").text(__("No readings. Apply will clear the draft's weighments; FIFO review is still required before saving."));
+                return;
+            }
+            rows.forEach((row, index) => {
+                const previous = index && rows[index - 1].scale_weight !== "" ? Number(rows[index - 1].scale_weight) : NaN;
+                const scale = row.scale_weight !== "" ? Number(row.scale_weight) : NaN;
+                const adjustment = Number(row.adjustment_qty || 0);
+                const accepted = previous - scale + adjustment;
+                wrapper.find(`[data-previous="${index}"]`).text(Number.isFinite(previous) ? quantity(previous) : "—");
+                wrapper.find(`[data-accepted="${index}"]`).text(!index ? "0.000" : Number.isFinite(accepted) ? quantity(accepted) : "—");
+            });
+            try {
+                api.prepare_weighments(rows, items);
+                wrapper.find("[data-sequence-status]").text(__("Reading sequence is valid. Apply, then review FIFO before saving."));
+            } catch (error) {
+                wrapper.find("[data-sequence-status]").text(error.message);
+            }
         }
-        dialog.show(); update_item();
-    }
+        wrapper.on("input.weighmentSequence change.weighmentSequence", "[data-reading][data-field]", function () {
+            rows[Number(this.dataset.reading)][this.dataset.field] = this.value;
+            preview();
+        });
+        wrapper.on("click.weighmentSequence", "[data-add-reading]", () => {
+            if (rows.length >= 200) { frappe.msgprint(__("At most 200 readings are supported.")); return; }
+            rows.push(new_row(!rows.length, dialog.get_value("new_date"), dialog.get_value("new_bridge"), dialog.get_value("new_uom")));
+            paint();
+        });
+        wrapper.on("click.weighmentSequence", "[data-clear-readings]", () => {
+            frappe.confirm(__("Clear all readings in this dialog? The draft changes only when you click Apply Weighments."), () => {
+                rows.splice(0); paint();
+            });
+        });
+        wrapper.on("click.weighmentSequence", "[data-remove-reading]", function () {
+            const index = Number(this.dataset.removeReading);
+            frappe.confirm(__("Remove this reading? The next pair will use the preceding remaining weight."), () => {
+                rows.splice(index, 1); paint();
+            });
+        });
+        dialog.show(); paint();
+    };
 
     async function review_draft(frm) {
         const state = frm.__j2_state;
