@@ -70,6 +70,7 @@ doctype_js = {
 
 app_include_js = [
 	"/assets/subcontracting_extensions/js/subcontracting_workspace_link.js",
+	"/assets/subcontracting_extensions/js/processor_receipt_entry_preview.js",
 ]
 
 doc_events = {
@@ -539,4 +540,3 @@ override_whitelisted_methods = {
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
-

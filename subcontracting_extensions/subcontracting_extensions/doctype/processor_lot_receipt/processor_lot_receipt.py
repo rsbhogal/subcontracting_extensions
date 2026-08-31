@@ -138,6 +138,9 @@ class ProcessorLotReceipt(Document):
 		calculated immediately in the browser.
 		"""
 
+		if self.get("__v2_entry_preview"):
+			frappe.throw(_("Workspace preview only. Saving is not enabled in this checkpoint."))
+
 		self._validate_processor_lot_immutability()
 		self._validate_receipt_structure_immutability()
 

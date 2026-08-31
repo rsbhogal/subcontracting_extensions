@@ -3,6 +3,13 @@
 
 frappe.ui.form.on("Processor Lot Receipt", {
     refresh(frm) {
+        if (frm.doc.__v2_entry_preview) {
+            frappe.subcontracting_entry_preview.render(frm);
+            return;
+        }
+        if (frappe.subcontracting_entry_preview) {
+            frappe.subcontracting_entry_preview.restore(frm);
+        }
         clear_unlinked_stock_uom_default(frm);
         calculate_physical_weights(frm);
         calculate_commercial_reconciliation(frm);
@@ -18,6 +25,12 @@ frappe.ui.form.on("Processor Lot Receipt", {
 
     after_save(frm) {
         prompt_to_refresh_stale_draft_scr(frm);
+    },
+
+    validate(frm) {
+        if (frm.doc.__v2_entry_preview) {
+            frappe.throw(__("Workspace preview only. Saving is not enabled in this checkpoint."));
+        }
     },
 
     supplier_gross_weight(frm) {
