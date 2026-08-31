@@ -19,7 +19,7 @@ from datetime import time, timedelta
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, get_datetime
+from frappe.utils import cint, flt, get_datetime
 from subcontracting_extensions.subcontracting_extensions.doctype.processor_lot.processor_lot import (
         refresh_processor_lot_receipt_summary,
 )
@@ -144,12 +144,12 @@ class ProcessorLotReceipt(Document):
 		self._validate_processor_lot_immutability()
 		self._validate_receipt_structure_immutability()
 
-		if not self.processor_lot:
-			return
-
-		self._set_header_from_processor_lot()
-
 		if self._uses_v2_item_structure():
+			if self.processor_lot:
+				# Preserve the existing lot-led V2 console/regression path.
+				self._set_header_from_processor_lot()
+			else:
+				self._validate_processor_first_context()
 			self._prepare_v2_receipt_items()
 			self._calculate_v2_truck_differentials()
 			self._calculate_v2_item_commercial_reconciliation()
@@ -158,6 +158,10 @@ class ProcessorLotReceipt(Document):
 			self._sync_single_v2_item_to_legacy_header()
 			return
 
+		if not self.processor_lot:
+			return
+
+		self._set_header_from_processor_lot()
 		self._set_processed_item_from_sco()
 		self._calculate_net_weights()
 		self._set_company_accepted_qty_from_measurement()
@@ -167,16 +171,28 @@ class ProcessorLotReceipt(Document):
 
 	def validate(self) -> None:
 		"""Validate the physical and linked-document facts."""
-		if not self.processor_lot:
-			frappe.throw(_("Processor Lot is required."))
-
 		if self._uses_v2_item_structure():
+			if not self.processor_lot:
+				self._validate_processor_first_context()
 			self._validate_v2_receipt_items()
 			self._validate_v2_weighments()
 			self._validate_v2_allocations()
 			self._validate_v2_material_credit()
 			self._validate_v2_linked_scr_consistency()
 			return
+
+		if not self.processor_lot:
+			frappe.throw(_("Processor Lot is required."))
+
+		# These schema requirements are now conditional for the V2 boundary.
+		# Enforce the legacy requirements server-side as well as in the form.
+		for fieldname, label in (
+			("measurement_method", "Measurement Method"),
+			("company_weighment_uom", "Company Measurement UOM"),
+			("supplier_weighment_uom", "Supplier Measurement UOM"),
+		):
+			if not self.get(fieldname):
+				frappe.throw(_("{0} is required.").format(_(label)))
 
 		self._validate_weights()
 		self._validate_lot_allocations()
@@ -190,6 +206,53 @@ class ProcessorLotReceipt(Document):
 	def _uses_v2_item_structure(self) -> bool:
 		"""Return whether this receipt uses the itemized V2 contract."""
 		return self.receipt_structure_version == V2_RECEIPT_STRUCTURE
+
+	def _validate_processor_first_context(self) -> None:
+		"""Validate the opt-in, headerless V2 draft without choosing a lot.
+
+		This checkpoint does not enable the browser form. Its existing preview
+		marker remains unsaveable. Supplier invoice identity also remains PI-owned.
+		"""
+		if not cint(frappe.conf.get("v2_processor_first_draft_entry")):
+			frappe.throw(_("Processor-first draft entry is not enabled on this site."))
+
+		if self.subcontracting_order:
+			frappe.throw(_("A processor-first receipt must not have a header Subcontracting Order."))
+
+		previous_doc = self.get_doc_before_save()
+		for fieldname, doctype in (
+			("company", "Company"),
+			("supplier", "Supplier"),
+			("supplier_warehouse", "Warehouse"),
+		):
+			value = self.get(fieldname)
+			if not value:
+				frappe.throw(_("{0} is required for a processor-first receipt.").format(_(doctype)))
+			if previous_doc and previous_doc.get(fieldname) != value:
+				frappe.throw(
+					_("{0} cannot be changed after this receipt has been saved.").format(_(doctype)),
+					title=_("Processor Context Is Locked"),
+				)
+			context_doc = frappe.get_doc(doctype, value)
+			context_doc.check_permission("read")
+			if doctype == "Supplier" and context_doc.get("disabled"):
+				frappe.throw(_("The selected Processor is disabled."))
+			if doctype == "Warehouse" and (
+				context_doc.company != self.company
+				or context_doc.get("disabled")
+				or context_doc.get("is_group")
+			):
+				frappe.throw(_("Supplier Warehouse must be an enabled leaf warehouse of the selected Company."))
+
+		# Context is permission-checked here; source eligibility and the exact
+		# supplier/warehouse relationship are checked afresh by the FIFO helper.
+		for item in self.receipt_items or []:
+			if not item.processed_item:
+				frappe.throw(_("Every Receipt Item must specify a Processed Item."))
+			item_doc = frappe.get_doc("Item", item.processed_item)
+			item_doc.check_permission("read")
+			if item_doc.get("disabled"):
+				frappe.throw(_("Receipt Items cannot contain a disabled Item."))
 
 	def _validate_receipt_structure_immutability(self) -> None:
 		"""Prevent a saved legacy or V2 receipt changing data contracts."""
@@ -467,7 +530,11 @@ class ProcessorLotReceipt(Document):
 
 	def _get_v2_fifo_candidates(self, item) -> list[frappe._dict]:
 		"""Return FIFO lot capacity compatible with one receipt item."""
-		processor_lots = frappe.get_all(
+		processor_first = not self.processor_lot
+		# The new headerless path and workspace preview share permission-aware
+		# eligibility. Keep the existing lot-led V2 regression path unchanged.
+		get_lots = frappe.get_list if processor_first else frappe.get_all
+		processor_lots = get_lots(
 			"Processor Lot",
 			filters={
 				"docstatus": 0,
@@ -480,17 +547,32 @@ class ProcessorLotReceipt(Document):
 				"subcontracting_order",
 				"purchase_order",
 				"creation",
+				"settlement_status",
 			],
 			order_by="creation asc, name asc",
+			limit_page_length=0,
 		)
 		candidates = []
 
 		for processor_lot in processor_lots:
+			if processor_first and (
+				not processor_lot.subcontracting_order
+				or processor_lot.settlement_status in ("Completed", "Debit Note Created")
+			):
+				continue
 			sco = frappe.get_doc(
 				"Subcontracting Order",
 				processor_lot.subcontracting_order,
 			)
 			if sco.docstatus != 1:
+				continue
+			if processor_first and (
+				not sco.has_permission("read")
+				or sco.status in ("Closed", "Completed", "Cancelled")
+				or sco.company != self.company
+				or sco.supplier != self.supplier
+				or sco.supplier_warehouse != self.supplier_warehouse
+			):
 				continue
 
 			matching_rows = [
@@ -501,6 +583,11 @@ class ProcessorLotReceipt(Document):
 			]
 			if not matching_rows:
 				continue
+			if processor_first and len(sco.items) != 1:
+				frappe.throw(
+					_("Subcontracting Order {0} has multiple finished-item rows. Processor-first draft entry currently supports single-item lots only.").format(frappe.bold(sco.name)),
+					title=_("Multi-Item Lot Support Pending"),
+				)
 
 			if len(matching_rows) != 1:
 				frappe.throw(

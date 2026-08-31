@@ -300,8 +300,9 @@
    "fieldname": "company_weighment_uom",
    "fieldtype": "Link",
    "label": "Company Measurement UOM",
+   "mandatory_depends_on": "eval:doc.receipt_structure_version != 'V2 Itemized'",
    "options": "UOM",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "supplier_challan_number",
@@ -342,8 +343,9 @@
    "fieldname": "supplier_weighment_uom",
    "fieldtype": "Link",
    "label": "Supplier MeasurementUOM",
+   "mandatory_depends_on": "eval:doc.receipt_structure_version != 'V2 Itemized'",
    "options": "UOM",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "columns": 1,
@@ -413,8 +415,9 @@
    "fieldname": "processor_lot",
    "fieldtype": "Link",
    "label": "Processor Lot",
+   "mandatory_depends_on": "eval:doc.receipt_structure_version != 'V2 Itemized'",
    "options": "Processor Lot",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fetch_from": "processor_lot.subcontracting_order",
@@ -494,8 +497,9 @@
    "fieldname": "measurement_method",
    "fieldtype": "Select",
    "label": "Measurement Method",
+   "mandatory_depends_on": "eval:doc.receipt_structure_version != 'V2 Itemized'",
    "options": "\nWeight\nCount",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "column_break_ijec",
