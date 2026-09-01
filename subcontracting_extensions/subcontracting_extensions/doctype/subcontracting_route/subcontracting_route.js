@@ -7,6 +7,7 @@ frappe.ui.form.on("Subcontracting Route", {
         set_service_item_query(frm);
         set_manufacturing_bom_query(frm);
         set_route_component_warehouse_query(frm);
+        set_finished_goods_target_warehouse_query(frm);
         render_manufacturing_bom_summary(frm);
         set_route_component_properties(frm);
         highlight_missing_source_warehouses(frm);
@@ -98,6 +99,13 @@ function set_route_component_warehouse_query(frm) {
             };
         }
     );
+}
+
+/** Restrict the route's finished-goods destination to active leaf warehouses. */
+function set_finished_goods_target_warehouse_query(frm) {
+    frm.set_query("finished_goods_target_warehouse", () => ({
+        filters: {is_group: 0, disabled: 0}
+    }));
 }
 
 /**

@@ -27,7 +27,7 @@ frappe.provide("frappe.subcontracting_entry_preview");
             size: "extra-large",
             fields: [
                 {fieldtype: "HTML", options: `<p>${escape(__(draft_mode
-                    ? "Select the processor and warehouse, then the invoiced items. Draft saving affects lot balances; no downstream documents are enabled in J2."
+                    ? "Select the processor and warehouse, then the invoiced items. Draft saving affects lot balances; downstream documents remain disabled."
                     : "Select the processor and warehouse, then find compatible lots. This trial cannot save a receipt or reserve capacity."))}</p>`},
                 {fieldname: "company", fieldtype: "Link", options: "Company", label: __("Company"), reqd: 1,
                     default: frappe.defaults.get_user_default("Company"), onchange: invalidate},
@@ -234,7 +234,7 @@ frappe.provide("frappe.subcontracting_entry_preview");
         if (state.enabled) frm.enable_save();
         if (!frm.is_new() && !frm.is_dirty()) state.reviewed = signature(frm);
         frm.set_intro(__(state.enabled
-            ? "J2 DRAFT ONLY: enter measurements and quantities, then Review FIFO Allocations before Save. Saving changes lot balances but creates no stock or accounting documents."
+            ? "J4 DRAFT ONLY: enter measurements and quantities, then Review FIFO Allocations before Save. Saving changes lot balances but creates no stock or accounting documents."
             : "Draft entry is disabled on this site, or this receipt already has downstream documents. This view is read-only."), "orange");
         paint_draft(frm);
     };
@@ -286,7 +286,7 @@ frappe.provide("frappe.subcontracting_entry_preview");
                     ${button("weighments", "Record / Edit Truck Weighments")}
                     <div class="table-responsive mt-2"><table class="table table-bordered table-sm">
                         <thead><tr><th>${escape(__("Stage / Time"))}</th><th>${escape(__("Item Key"))}</th><th>${escape(__("Scale Weight"))}</th><th>${escape(__("Adjustment"))}</th><th>${escape(__("Derived Accepted"))}</th></tr></thead>
-                        <tbody>${(doc.item_weighments || []).map((row, index) => `<tr><td>${escape(row.weighment_stage)}<br>${escape(row.weighment_date)} ${escape(row.weighment_time || "")}</td><td>${escape(row.receipt_item_key || "—")}</td>
+                        <tbody>${(doc.item_weighments || []).map((row, index) => `<tr><td>${escape(row.weighment_stage)}<br>${escape(row.weighment_date)} ${escape(String(row.weighment_time || "").split(".")[0])}</td><td>${escape(row.receipt_item_key || "—")}</td>
                             <td>${quantity(row.scale_weight)} ${escape(row.measurement_uom)}</td><td>${quantity(row.adjustment_qty)}</td><td>${quantity(row.accepted_qty)}</td></tr>`).join("")}</tbody>
                     </table></div>` : ""}
                 <h4 class="mt-4">${escape(__("Lot Allocations"))}</h4>
@@ -299,7 +299,7 @@ frappe.provide("frappe.subcontracting_entry_preview");
                     <tbody>${(doc.lot_allocations || []).map(row => `<tr><td>${escape(row.receipt_item_key)}<br>${escape(row.stock_uom)}</td><td>${escape(row.processor_lot)}<br>${escape(row.subcontracting_order)}</td>
                         <td>${quantity(row.available_qty)}</td><td>${quantity(row.allocated_accepted_qty)}</td><td>${quantity(row.allocated_invoice_qty)}</td></tr>`).join("")}</tbody>
                 </table></div>
-                <p class="text-muted">${escape(__("J2 uses automatic FIFO against existing single-item lots. Allocation overrides, material credit and downstream document actions are not enabled."))}</p>
+                <p class="text-muted">${escape(__("J4 supports distinct finished items within a lot using item-specific FIFO. Duplicate item/UOM source rows, allocation overrides, material credit and downstream document actions remain disabled."))}</p>
             </div>`);
         wrapper.off("click.processorFirst").on("click.processorFirst", "[data-j2-action]", function () {
             if (!state.enabled || state.busy) return;
@@ -417,6 +417,30 @@ frappe.provide("frappe.subcontracting_entry_preview");
         return rows;
     };
 
+    api.make_weighment_control = function (parent, row, field, index, changed) {
+        const original = row[field] || "";
+        const display = field === "weighment_time" ? String(original).split(".")[0] : original;
+        let ready = false;
+        let edited = false;
+        const control = frappe.ui.form.make_control({parent, render_input: true, df: {
+            fieldname: `${field}_${index}`, fieldtype: field === "weighment_time" ? "Time" : "Date",
+            label: __(field === "weighment_time" ? "Time" : "Date"),
+            onchange() {
+                if (!ready) return;
+                const value = control.get_value() || "";
+                // Merely displaying a fractional legacy timestamp must not
+                // silently truncate its stored value when Apply is clicked.
+                if (!edited && value === display) return;
+                edited = true;
+                row[field] = value;
+                changed();
+            },
+        }});
+        control.set_input(display);
+        ready = true;
+        return control;
+    };
+
     api.edit_weighments = function (frm) {
         if (!frm.__j2_state?.enabled || frm.__j2_state.busy || is_linked(frm)) return;
         const origin = signature(frm);
@@ -466,11 +490,18 @@ frappe.provide("frappe.subcontracting_entry_preview");
             const numeric_field = ["scale_weight", "adjustment_qty"].includes(field);
             const raw = row[field];
             const value = numeric_field && /^-?\d+(?:\.\d{1,3})?$/.test(String(raw ?? "")) && Number.isFinite(Number(raw)) ? quantity(raw) : (raw || "");
-            return `<input class="form-control input-sm" type="${type}" ${type === "time" ? 'step="0.000001"' : ""}
+            return `<input class="form-control input-sm" type="${type}"
                 data-reading="${index}" data-field="${field}" aria-label="${escape(field)}" value="${escape(value)}"
                 ${numeric_field ? 'inputmode="decimal"' : ""}>`;
         };
+        let date_controls = [];
+        function destroy_date_controls() {
+            date_controls.forEach(control => control.datepicker?.destroy?.());
+            date_controls = [];
+        }
+        dialog.$wrapper?.on("hidden.bs.modal.j4", destroy_date_controls);
         function paint() {
+            destroy_date_controls();
             wrapper.html(`<p>${escape(__("Arrival is entered once. Each unloading pairs its new weight with the previous reading automatically. Defaults above apply only to newly added readings. Closing without Apply leaves the draft unchanged."))}</p>
                 <div class="table-responsive"><table class="table table-bordered table-sm">
                 <thead><tr><th>${escape(__("Reading / Item Unloaded"))}</th><th>${escape(__("Previous Weight"))}</th><th>${escape(__("New Scale Weight"))}</th>
@@ -484,8 +515,8 @@ frappe.provide("frappe.subcontracting_entry_preview");
                     <td>${index ? input(row, index, "adjustment_qty") : "0.000"}</td><td data-accepted="${index}">—</td>
                     <td>${index ? `<button type="button" class="btn btn-default btn-xs" data-remove-reading="${index}">${escape(__("Remove"))}</button>` : ""}</td></tr>
                     <tr><td colspan="6"><div class="row">
-                        <div class="col-sm-3"><label>${escape(__("Date"))}</label>${input(row, index, "weighment_date", "date")}</div>
-                        <div class="col-sm-3"><label>${escape(__("Time"))}</label>${input(row, index, "weighment_time", "time")}</div>
+                        <div class="col-sm-3" data-date-control="${index}"></div>
+                        <div class="col-sm-3" data-time-control="${index}"></div>
                         <div class="col-sm-3"><label>${escape(__("Weighbridge"))}</label>${input(row, index, "weighbridge")}</div>
                         <div class="col-sm-3"><label>${escape(__("Slip Reference"))}</label>${input(row, index, "slip_number")}</div>
                     </div>${index ? `<label>${escape(__("Adjustment Reason"))}</label>${input(row, index, "adjustment_reason")}` : ""}</td></tr>`).join("")}
@@ -494,6 +525,10 @@ frappe.provide("frappe.subcontracting_entry_preview");
                 <button type="button" class="btn btn-default btn-sm" data-clear-readings>${escape(__("Clear Readings"))}</button>
                 <p class="mt-2" data-sequence-status role="status"></p>
                 <p class="text-muted">${escape(__("These are previews only. After Apply, Review FIFO Allocations again before Save. You can apply partial readings to the open draft, but saving still requires complete valid measurements."))}</p>`);
+            rows.forEach((row, index) => {
+                date_controls.push(api.make_weighment_control(wrapper.find(`[data-date-control="${index}"]`), row, "weighment_date", index, preview));
+                date_controls.push(api.make_weighment_control(wrapper.find(`[data-time-control="${index}"]`), row, "weighment_time", index, preview));
+            });
             preview();
         }
         function preview() {

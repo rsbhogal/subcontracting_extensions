@@ -55,6 +55,11 @@ from subcontracting_extensions.subcontracting_extensions.doctype.processor_lot.s
 REVERSAL_SCOPE_DEBIT_NOTE_ONLY = "Debit Note Only"
 REVERSAL_SCOPE_COMPLETE = "Complete Settlement"
 
+
+def _block_multi_item_settlement(sco):
+    if len(sco.items) > 1:
+        frappe.throw(_("Multi-item lots currently support receipt drafts only. Settlement is not enabled."))
+
 class ProcessorLot(Document):
     """Manage one SCO-wise processor reconciliation and settlement."""
 
@@ -85,6 +90,7 @@ class ProcessorLot(Document):
         Where an outstanding component quantity remains, the normal
         reconciliation and settlement-document validations apply.
         """
+        _block_multi_item_settlement(self._get_sco())
         self._refresh_settlement_action()
         self._validate_header()
         self._refresh_settlement_values()
@@ -2244,6 +2250,10 @@ def create_processor_lot_debit_note(
             )
         )
 
+    lot_for_scope = frappe.get_doc("Processor Lot", processor_lot)
+    lot_for_scope.check_permission("write")
+    _block_multi_item_settlement(frappe.get_doc("Subcontracting Order", lot_for_scope.subcontracting_order))
+
     # A residual Debit Note is the final settlement step. Every generated
     # material-credit bundle must first complete its controlled submission
     # sequence: Stock Entry, Journal Entry, then PMA.
@@ -2830,6 +2840,10 @@ def get_processor_lot_physical_position(
         lot.subcontracting_order,
     )
 
+    if len(sco.items) > 1:
+        from subcontracting_extensions.receipt_item_position import get_item_position
+        return get_item_position(lot.name)
+
     finished_rows = [
         row
         for row in sco.items
@@ -3097,12 +3111,29 @@ def refresh_processor_lot_receipt_summary(
     if not processor_lot:
         return
 
+    lot = frappe.get_doc("Processor Lot", processor_lot)
+    sco = frappe.get_doc("Subcontracting Order", lot.subcontracting_order)
+    if len(sco.items) > 1:
+        from subcontracting_extensions.receipt_item_position import position_for_lot
+        report = position_for_lot(lot, sco)
+        dates = [item.last_receipt_date for item in report["items"] if item.last_receipt_date]
+        # Item facts are computed live. Legacy scalar quantities have no
+        # meaningful interpretation for different finished items/UOMs.
+        frappe.db.set_value("Processor Lot", processor_lot, {
+            "receipt_count": report["truck_count"],
+            "last_receipt_date": max(dates, key=str) if dates else None,
+            "receipt_stock_uom": None,
+            "total_company_accepted_qty": 0, "total_supplier_invoice_qty": 0,
+            "total_company_net_weight": 0, "total_supplier_net_weight": 0,
+        }, update_modified=False)
+        return
+
     receipts = _get_processor_lot_allocated_receipts(
         processor_lot,
         exclude_cancelled=True,
     )
 
-    receipt_count = len(receipts)
+    receipt_count = len({receipt.name for receipt in receipts})
     last_receipt_date = None
     stock_uom = None
 
@@ -3220,6 +3251,14 @@ def get_processor_lot_receipt_journey(
                 frappe.bold(processor_lot)
             )
         )
+
+    lot = frappe.get_doc("Processor Lot", processor_lot)
+    sco = frappe.get_doc("Subcontracting Order", lot.subcontracting_order)
+    if len(sco.items) > 1:
+        from subcontracting_extensions.receipt_item_position import get_item_position
+        report = get_item_position(lot.name)
+        # Explicit variant: no legacy mixed-item quantity or row-count summary.
+        return {"is_multi_item": True, "item_position": report}
 
     receipts = _get_processor_lot_allocated_receipts(
         processor_lot,

@@ -11,6 +11,7 @@
   "route_definition_section",
   "finished_item",
   "service_item",
+  "finished_goods_target_warehouse",
   "route_description",
   "route_definition_column",
   "manufacturing_bom",
@@ -53,6 +54,14 @@
    "label": "Service Item",
    "options": "Item",
    "reqd": 1
+  },
+  {
+   "description": "V2: authoritative destination for this route's finished item. Component source warehouses remain defined below.",
+   "fieldname": "finished_goods_target_warehouse",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Finished Goods Target Warehouse",
+   "options": "Warehouse"
   },
   {
    "fieldname": "route_definition_column",

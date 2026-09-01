@@ -6,7 +6,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
 
 class SubcontractingRoute(Document):
@@ -28,6 +28,7 @@ class SubcontractingRoute(Document):
         self._validate_finished_item()
         self._validate_service_item()
         self._validate_bom()
+        self._validate_finished_goods_target_warehouse()
         self._validate_route_components()
         self._validate_duplicate_route()
 
@@ -74,6 +75,44 @@ class SubcontractingRoute(Document):
                     frappe.bold(item.name)
                 )
             )
+
+    # ---------------------------------------------------------------------
+    # Finished Goods Target Warehouse
+    # ---------------------------------------------------------------------
+
+    def _validate_finished_goods_target_warehouse(self):
+        """Validate a configured target; require it for active V2 routes."""
+        warehouse_name = self.get("finished_goods_target_warehouse")
+
+        if not warehouse_name:
+            if self.is_active and cint(
+                frappe.conf.get("v2_processor_first_draft_entry")
+            ):
+                frappe.throw(
+                    _("Finished Goods Target Warehouse is required for an active V2 route."),
+                    title=_("Target Warehouse Required"),
+                )
+            return
+
+        warehouse = frappe.db.get_value(
+            "Warehouse",
+            warehouse_name,
+            ["is_group", "disabled"],
+            as_dict=True,
+        )
+
+        if not warehouse:
+            frappe.throw(_("Finished Goods Target Warehouse {0} does not exist.").format(
+                frappe.bold(warehouse_name)
+            ))
+        if warehouse.is_group:
+            frappe.throw(_("Finished Goods Target Warehouse {0} is a group warehouse.").format(
+                frappe.bold(warehouse_name)
+            ))
+        if warehouse.disabled:
+            frappe.throw(_("Finished Goods Target Warehouse {0} is disabled.").format(
+                frappe.bold(warehouse_name)
+            ))
 
     # ---------------------------------------------------------------------
     # Manufacturing BOM

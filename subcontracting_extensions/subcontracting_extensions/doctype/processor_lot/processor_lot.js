@@ -28,7 +28,8 @@ frappe.ui.form.on("Processor Lot", {
         });
     },
 
-    refresh(frm) {
+    async refresh(frm) {
+        if (await render_multi_item_receipt_checkpoint(frm)) return;
         set_field_properties(frm);
         apply_settlement_policy_override_properties(frm);
         highlight_settlement_policy_source(frm);
@@ -87,6 +88,65 @@ frappe.ui.form.on("Processor Lot", {
         refresh_settlement_action(frm);
     }
 });
+
+
+// J4: keep the legacy renderer untouched for single-item lots. Multi-item
+// receipt drafts use explicit item facts; aggregate settlement is not enabled.
+async function render_multi_item_receipt_checkpoint(frm) {
+    const hidden_fields = ["receipt_stock_uom", "total_company_accepted_qty", "total_supplier_invoice_qty",
+        "total_company_net_weight", "total_supplier_net_weight"];
+    if (frm.__j4_hidden_fields) {
+        for (const [field, hidden] of Object.entries(frm.__j4_hidden_fields)) frm.set_df_property(field, "hidden", hidden);
+        frm.__j4_hidden_fields = null;
+    }
+    if (frm.is_new() || !frm.doc.subcontracting_order) return false;
+    const name = frm.doc.name;
+    const ticket = frm.__j4_request = (frm.__j4_request || 0) + 1;
+    let report;
+    try {
+        const response = await frappe.call({method: "subcontracting_extensions.receipt_item_position.get_item_position",
+            args: {processor_lot: name}});
+        if (frm.doc.name !== name || frm.__j4_request !== ticket) return true;
+        report = response.message;
+    } catch (error) {
+        if (frm.doc.name === name && frm.__j4_request === ticket) {
+            for (const field of ["physical_receipt_position_html", "receipt_journey_html", "health_panel_html"]) {
+                frm.get_field(field)?.$wrapper.html(
+                    `<p class="text-danger">${__("Item-wise receipt position could not be verified. Reload after correcting the reported error.")}</p>`);
+            }
+        }
+        return true;
+    }
+    if (!report?.enabled || !report.is_multi_item) return false;
+    frm.__j4_hidden_fields = {};
+    for (const field of hidden_fields) {
+        const df = frm.get_field(field)?.df;
+        if (df) { frm.__j4_hidden_fields[field] = df.hidden || 0; frm.set_df_property(field, "hidden", 1); }
+    }
+    const esc = value => frappe.utils.escape_html(String(value ?? ""));
+    const qty = value => Number(value || 0).toFixed(3);
+    const table = (headers, rows) => `<div class="table-responsive"><table class="table table-bordered table-sm">
+        <thead><tr>${headers.map(h => `<th>${esc(__(h))}</th>`).join("")}</tr></thead>
+        <tbody>${rows.length ? rows.map(row => `<tr>${row.map(cell => `<td>${esc(cell)}</td>`).join("")}</tr>`).join("")
+            : `<tr><td colspan="${headers.length}">${esc(__("No recorded receipt items."))}</td></tr>`}</tbody></table></div>`;
+    const set_panel = (field, html) => frm.get_field(field)?.$wrapper.html(html);
+    const notice = `<p class="text-warning">${esc(__("Multi-item receipt-draft checkpoint: downstream creation, material-credit application and settlement are not enabled."))}</p>`;
+    set_panel("physical_receipt_position_html", notice + `<p>${esc(__("Distinct trucks for this lot"))}: <strong>${report.truck_count}</strong></p>`
+        + table(["Item", "UOM", "Receipts for item", "Ordered", "PLR Accepted", "Invoice", "Invoice − Accepted", "Ordered − PLR Accepted"],
+            report.items.map(item => [item.processed_item, item.stock_uom, item.receipt_count,
+                qty(item.ordered_qty), qty(item.accepted_qty), qty(item.invoice_qty), qty(item.invoice_vs_accepted_qty), qty(item.plr_balance_qty)]))
+        + `<p class="text-muted">${esc(__("Receipt counts are distinct trucks containing each item. A truck can count once for several items, but only once for the lot. PLR quantities include saved drafts."))}</p>`);
+    set_panel("health_panel_html", table(["Item", "UOM", "Net SCR Received", "PLR Qty Not Yet in Submitted SCR", "Applied Credit", "Available for Receipt"],
+        report.items.map(item => [item.processed_item, item.stock_uom, qty(item.native_received_qty),
+            qty(item.unposted_accepted_qty), qty(item.credit_applied_qty), qty(item.available_qty)]))
+        + `<p class="text-muted">${esc(__("Availability deducts net SCR receipts, saved PLR quantities not yet recognised by a submitted SCR, and applied credits. A linked submitted SCR is not counted twice."))}</p>`);
+    set_panel("receipt_journey_html", table(["Receipt", "Date", "Item", "UOM", "Accepted", "Invoice", "SCR", "PR", "PI"],
+        report.journeys.map(row => [row.processor_lot_receipt, row.physical_receipt_date || "", row.processed_item,
+            row.stock_uom, qty(row.accepted_qty), qty(row.invoice_qty), row.subcontracting_receipt || "—",
+            row.purchase_receipt || "—", row.purchase_invoice || "—"])));
+    hide_items_grid_controls(frm);
+    return true;
+}
 
 
 function add_credit_application_completion_button(frm) {

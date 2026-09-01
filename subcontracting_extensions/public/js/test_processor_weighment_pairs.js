@@ -22,7 +22,9 @@ global.frappe = {
     throw(message) { throw new Error(message); },
     confirm(message, yes) { yes(); },
     msgprint() {},
-    ui: {Dialog: class {
+    ui: {form: {make_control({df}) {
+        return {df, set_input(value) { this.value = value; }, get_value() { return this.value; }};
+    }}, Dialog: class {
         constructor(options) {
             this.options = options; this.fields_dict = {readings: {$wrapper: new Wrapper()}};
             this.values = Object.fromEntries(options.fields.map(field => [field.fieldname, field.default]));
@@ -196,5 +198,25 @@ test("first appended reading after clearing is Arrival Loaded", () => {
     wrapper.input(0, "scale_weight", "5100.000");
     dialog.options.primary_action();
     assert.strictEqual(frm.doc.item_weighments[0].weighment_stage, "Arrival Loaded");
+});
+test("standard Time control preserves fractional timestamp until edited", () => {
+    const values = {weighment_time: "12:21:09.200123"};
+    let changes = 0;
+    const control = api.make_weighment_control({}, values, "weighment_time", 0, () => changes++);
+    assert.strictEqual(control.df.fieldtype, "Time");
+    assert.strictEqual(control.value, "12:21:09");
+    control.df.onchange();
+    assert.strictEqual(values.weighment_time, "12:21:09.200123");
+    assert.strictEqual(changes, 0);
+    control.value = "12:22:00"; control.df.onchange();
+    assert.strictEqual(values.weighment_time, "12:22:00");
+    assert.strictEqual(changes, 1);
+});
+test("standard Date control applies explicit edits", () => {
+    const values = {weighment_date: "2026-08-31"};
+    const control = api.make_weighment_control({}, values, "weighment_date", 0, () => {});
+    assert.strictEqual(control.df.fieldtype, "Date");
+    control.value = "2026-09-01"; control.df.onchange();
+    assert.strictEqual(values.weighment_date, "2026-09-01");
 });
 console.log(`Combined weighment checks: ${count} PASS`);

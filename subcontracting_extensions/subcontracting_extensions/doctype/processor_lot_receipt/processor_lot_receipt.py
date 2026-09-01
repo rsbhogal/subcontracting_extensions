@@ -603,11 +603,12 @@ class ProcessorLotReceipt(Document):
 			]
 			if not matching_rows:
 				continue
-			if processor_first and len(sco.items) != 1:
-				frappe.throw(
-					_("Subcontracting Order {0} has multiple finished-item rows. Processor-first draft entry currently supports single-item lots only.").format(frappe.bold(sco.name)),
-					title=_("Multi-Item Lot Support Pending"),
-				)
+			multi_item = processor_first and len(sco.items) > 1
+			item_position = None
+			if multi_item:
+				from subcontracting_extensions.receipt_item_position import position_for_lot
+				position = position_for_lot(processor_lot, sco, None if self.is_new() else self.name)
+				item_position = {row.subcontracting_order_item: row for row in position["items"]}
 
 			if len(matching_rows) != 1:
 				frappe.throw(
@@ -620,7 +621,7 @@ class ProcessorLotReceipt(Document):
 
 			sco_item = matching_rows[0]
 			lot_order_qty = flt(sco_item.qty, ITEM_QUANTITY_PRECISION)
-			allocated_received_qty = self._get_lot_allocated_accepted_qty(
+			allocated_received_qty = 0 if multi_item else self._get_lot_allocated_accepted_qty(
 				processor_lot.name
 			)
 			native_received_qty = flt(
@@ -640,6 +641,10 @@ class ProcessorLotReceipt(Document):
 				item.processed_item,
 				item.stock_uom,
 			)
+			if multi_item:
+				facts = item_position[sco_item.name]
+				previously_received_qty = facts.previously_received_qty
+				credit_applied_qty = facts.credit_applied_qty
 			available_qty = flt(
 				lot_order_qty - previously_received_qty - credit_applied_qty,
 				ITEM_QUANTITY_PRECISION,
@@ -964,14 +969,15 @@ class ProcessorLotReceipt(Document):
 					title=_("Allocation Item Mismatch"),
 				)
 
-			if row.processor_lot in seen_lots:
+			allocation_identity = (row.processor_lot, row.subcontracting_order_item)
+			if allocation_identity in seen_lots:
 				frappe.throw(
-					_("Processor Lot {0} occurs more than once.").format(
+					_("Processor Lot {0} has duplicate allocations for the same SCO item row.").format(
 						frappe.bold(row.processor_lot)
 					),
 					title=_("Duplicate Processor Lot Allocation"),
 				)
-			seen_lots.add(row.processor_lot)
+			seen_lots.add(allocation_identity)
 			rows_by_item.setdefault(item.item_key, []).append(row)
 
 		for item in self.receipt_items or []:

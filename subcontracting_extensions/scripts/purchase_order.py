@@ -14,6 +14,7 @@ Current responsibilities
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 
 def validate(doc, method=None):
@@ -60,6 +61,7 @@ def validate_subcontracting_routes(doc):
                 "finished_item",
                 "service_item",
                 "manufacturing_bom",
+                "finished_goods_target_warehouse",
             ],
             as_dict=True,
         )
@@ -110,6 +112,70 @@ def validate_subcontracting_routes(doc):
                 title=_("Processing Route Mismatch"),
             )
 
+        if cint(frappe.conf.get("v2_processor_first_draft_entry")):
+            row.warehouse = _get_v2_route_target_warehouse(
+                route_name=route_name,
+                company=doc.company,
+                route=route,
+            )
+
+
+def _get_v2_route_target_warehouse(route_name, company, route=None):
+    """Return one controlled V2 route destination after company checks."""
+    route = route or frappe.db.get_value(
+        "Subcontracting Route",
+        route_name,
+        ["is_active", "finished_goods_target_warehouse"],
+        as_dict=True,
+    )
+    warehouse_name = route and route.get("finished_goods_target_warehouse")
+
+    if not warehouse_name:
+        frappe.throw(
+            _("Processing Route {0} has no Finished Goods Target Warehouse.").format(
+                frappe.bold(route_name)
+            ),
+            title=_("Route Target Warehouse Required"),
+        )
+
+    warehouse = frappe.db.get_value(
+        "Warehouse",
+        warehouse_name,
+        ["company", "is_group", "disabled"],
+        as_dict=True,
+    )
+    if not warehouse:
+        frappe.throw(_("Target Warehouse {0} does not exist.").format(
+            frappe.bold(warehouse_name)
+        ))
+    if warehouse.company != company:
+        frappe.throw(_("Target Warehouse {0} belongs to {1}, not PO Company {2}.").format(
+            frappe.bold(warehouse_name), frappe.bold(warehouse.company), frappe.bold(company)
+        ))
+    if warehouse.is_group or warehouse.disabled:
+        frappe.throw(_("Target Warehouse {0} must be an enabled leaf warehouse.").format(
+            frappe.bold(warehouse_name)
+        ))
+    return warehouse_name
+
+
+@frappe.whitelist()
+def get_v2_route_targets(route_names, company):
+    """Permission-aware browser hint; PO validation remains authoritative."""
+    if not cint(frappe.conf.get("v2_processor_first_draft_entry")):
+        return {"enabled": False, "targets": {}}
+    names = frappe.parse_json(route_names) if isinstance(route_names, str) else route_names
+    if not isinstance(names, list) or len(names) > 200:
+        frappe.throw(_("Expected at most 200 Processing Routes."))
+    targets = {}
+    for route_name in dict.fromkeys(name for name in names if name):
+        route_doc = frappe.get_doc("Subcontracting Route", route_name)
+        route_doc.check_permission("read")
+        targets[route_name] = _get_v2_route_target_warehouse(
+            route_name, company, route_doc
+        )
+    return {"enabled": True, "targets": targets}
+
 def validate_subcontracted_purchase_order_item_count(doc):
     """
     Enforce the Bhogals single-item subcontracting policy.
@@ -128,6 +194,32 @@ def validate_subcontracted_purchase_order_item_count(doc):
     item_count = len(doc.items or [])
 
     if item_count <= 1:
+        return
+
+    if cint(frappe.conf.get("v2_processor_first_draft_entry")):
+        seen_finished_rows = set()
+
+        for row in doc.items or []:
+            identity = (
+                row.get("fg_item"),
+                row.get("stock_uom"),
+            )
+
+            if identity in seen_finished_rows:
+                frappe.throw(
+                    _(
+                        "Rows contain the Finished Item {0} more than once "
+                        "with Stock UOM {1}. Duplicate source rows are not "
+                        "supported in this V2 receipt-draft checkpoint."
+                    ).format(
+                        frappe.bold(identity[0] or _("blank")),
+                        frappe.bold(identity[1] or _("blank")),
+                    ),
+                    title=_("Ambiguous Finished Item Rows"),
+                )
+
+            seen_finished_rows.add(identity)
+
         return
 
     frappe.throw(

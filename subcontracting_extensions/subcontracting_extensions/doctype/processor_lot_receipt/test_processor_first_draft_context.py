@@ -57,6 +57,7 @@ class TestProcessorFirstDraftContext(unittest.TestCase):
 			receipt_items=[record(processed_item="ITEM-A", item_key="ITEM-001", name=None)],
 			item_weighments=[], lot_allocations=[],
 			get_doc_before_save=Mock(return_value=None),
+			is_new=Mock(return_value=True),
 		)
 		defaults.update(values)
 		result = record(**defaults)
@@ -242,17 +243,21 @@ class TestProcessorFirstDraftContext(unittest.TestCase):
 			with self.subTest(values=values), patch.multiple(sco, **values):
 				self.assertEqual(receipt._get_v2_fifo_candidates(item), [])
 
-	def test_fifo_rejects_multi_item_source_before_using_lot_wide_capacity(self):
+	def test_fifo_uses_item_position_without_lot_wide_capacity(self):
 		receipt, item, lot, sco, *_ = self.fifo_fixture()
 		sco.items.append(record(item_code="ITEM-B", stock_uom="Units"))
-		with self.assertRaisesRegex(frappe.ValidationError, "single-item lots only"):
-			receipt._get_v2_fifo_candidates(item)
+		with patch("subcontracting_extensions.receipt_item_position.position_for_lot", return_value={"items": [
+			record(subcontracting_order_item="SCO-ROW", previously_received_qty=20.123456, credit_applied_qty=1),
+		]}) as position:
+			result = receipt._get_v2_fifo_candidates(item)
+			self.assertEqual(result[0].available_qty, 78.876544)
+			position.assert_called_once_with(lot, sco, None)
 		receipt._get_lot_allocated_accepted_qty.assert_not_called()
 
 	def test_fifo_rejects_duplicate_source_item_rows(self):
 		receipt, item, lot, sco, *_ = self.fifo_fixture()
 		sco.items.append(sco.items[0])
-		with self.assertRaisesRegex(frappe.ValidationError, "single-item lots only"):
+		with patch("subcontracting_extensions.receipt_item_position.read_evidence", return_value=([], [], set(), [], [])), self.assertRaisesRegex(frappe.ValidationError, "Duplicate or ambiguous"):
 			receipt._get_v2_fifo_candidates(item)
 
 	def test_fifo_requires_matching_item_uom_and_positive_capacity(self):

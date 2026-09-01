@@ -40,6 +40,7 @@ frappe.ui.form.on("Purchase Order", {
         configure_supplier_warehouse(frm);
         configure_processing_route(frm);
         toggle_purchase_order_workspace_button(frm);
+        apply_v2_route_target_warehouses(frm);
     },
 
     is_subcontracted(frm) {
@@ -50,8 +51,45 @@ frappe.ui.form.on("Purchase Order", {
 
     supplier_warehouse(frm) {
         configure_supplier_warehouse(frm);
+    },
+
+    set_warehouse(frm) {
+        apply_v2_route_target_warehouses(frm);
     }
 });
+
+frappe.ui.form.on("Purchase Order Item", {
+    custom_processing_route(frm) {
+        apply_v2_route_target_warehouses(frm);
+    }
+});
+
+/** Reapply item destinations after a route or header warehouse change. */
+async function apply_v2_route_target_warehouses(frm) {
+    if (!frm.doc.is_subcontracted || !frm.doc.company) return;
+    const routes = [...new Set((frm.doc.items || [])
+        .map(row => row.custom_processing_route).filter(Boolean))];
+    if (!routes.length) return;
+    const signature = JSON.stringify([frm.doc.company, (frm.doc.items || [])
+        .map(row => [row.name, row.custom_processing_route])]);
+    const request = frm.__v2_route_target_request = (frm.__v2_route_target_request || 0) + 1;
+    const response = await frappe.call({
+        method: "subcontracting_extensions.scripts.purchase_order.get_v2_route_targets",
+        args: {route_names: routes, company: frm.doc.company}
+    });
+    if (request !== frm.__v2_route_target_request || signature !== JSON.stringify([
+        frm.doc.company, (frm.doc.items || []).map(row => [row.name, row.custom_processing_route])
+    ])) return;
+    const data = response.message || {};
+    if (!data.enabled) return;
+    for (const row of frm.doc.items || []) {
+        const target = data.targets?.[row.custom_processing_route];
+        if (target && row.warehouse !== target) {
+            await frappe.model.set_value(row.doctype, row.name, "warehouse", target);
+        }
+    }
+    frm.refresh_field("items");
+}
 
 /**
  * Show the Subcontracting button only for subcontracted POs.
