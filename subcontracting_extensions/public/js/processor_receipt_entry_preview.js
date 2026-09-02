@@ -11,6 +11,7 @@ frappe.provide("frappe.subcontracting_entry_preview");
         const mode = await frappe.call({method: "subcontracting_extensions.receipt_entry_preview.get_entry_mode"});
         const draft_mode = Boolean(mode.message.draft_entry_enabled);
         const draft_scr_mode = Boolean(mode.message.draft_scr_enabled);
+        const scr_submit_mode = Boolean(mode.message.scr_submit_enabled);
         let snapshot = null;
         let request_id = 0;
         const context = () => ({
@@ -29,7 +30,9 @@ frappe.provide("frappe.subcontracting_entry_preview");
             fields: [
                 {fieldtype: "HTML", options: `<p>${escape(__(draft_mode
                     ? draft_scr_mode
-                        ? "Select the processor and warehouse, then the invoiced items. A saved and reviewed receipt may create one Draft Subcontracting Receipt."
+                        ? scr_submit_mode
+                            ? "Select the processor and warehouse, then the invoiced items. A saved and reviewed receipt may create and submit one Subcontracting Receipt; Purchase Receipt creation remains disabled."
+                            : "Select the processor and warehouse, then the invoiced items. A saved and reviewed receipt may create one Draft Subcontracting Receipt."
                         : "Select the processor and warehouse, then the invoiced items. Draft saving affects lot balances; downstream documents remain disabled."
                     : "Select the processor and warehouse, then find compatible lots. This trial cannot save a receipt or reserve capacity."))}</p>`},
                 {fieldname: "company", fieldtype: "Link", options: "Company", label: __("Company"), reqd: 1,
@@ -282,11 +285,14 @@ frappe.provide("frappe.subcontracting_entry_preview");
         if (frm.__j2_state !== state || state.request !== current_request || frm.doc.name !== state.name) return;
         state.enabled = Boolean(response.message.draft_entry_enabled) && !is_linked(frm);
         state.draft_scr_enabled = Boolean(response.message.draft_scr_enabled);
+        state.scr_submit_enabled = Boolean(response.message.scr_submit_enabled);
         if (state.enabled) frm.enable_save();
         if (!frm.is_new() && !frm.is_dirty()) state.reviewed = signature(frm);
         frm.set_intro(__(state.enabled
             ? state.draft_scr_enabled
-                ? "J5 DRAFT SCR CHECKPOINT: review and save physical facts before creating one Draft Subcontracting Receipt. SCR submission and later documents remain disabled."
+                ? state.scr_submit_enabled
+                    ? "J6 SCR SUBMISSION CHECKPOINT: the linked Subcontracting Receipt may be submitted after exact item, allocation, warehouse and consumed-material validation. Purchase Receipt and later documents remain disabled."
+                    : "J5 DRAFT SCR CHECKPOINT: review and save physical facts before creating one Draft Subcontracting Receipt. SCR submission and later documents remain disabled."
                 : "J4 DRAFT ONLY: enter measurements and quantities, then Review FIFO Allocations before Save. Saving changes lot balances but creates no stock or accounting documents."
             : "Draft entry is disabled on this site, or this receipt already has downstream documents. This view is read-only."), "orange");
         api.setup_draft_page_actions(frm, state);

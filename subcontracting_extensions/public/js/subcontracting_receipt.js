@@ -2,10 +2,41 @@
 // For license information, please see license.txt
 
 frappe.ui.form.on("Subcontracting Receipt", {
+    refresh(frm) {
+        hide_processor_first_purchase_receipt_action(frm);
+    },
+
     before_submit(frm) {
         return confirm_original_document_reference(frm);
     }
 });
+
+
+async function hide_processor_first_purchase_receipt_action(frm) {
+    if (
+        frm.doc.docstatus !== 1
+        || !frm.doc.custom_processor_lot_receipt
+    ) {
+        return;
+    }
+
+    const response = await frappe.db.get_value(
+        "Processor Lot Receipt",
+        frm.doc.custom_processor_lot_receipt,
+        ["receipt_structure_version", "processor_first_draft_only"]
+    );
+    const plr = response && response.message;
+    if (
+        !plr
+        || plr.receipt_structure_version !== "V2 Itemized"
+        || !plr.processor_first_draft_only
+    ) {
+        return;
+    }
+
+    frm.remove_custom_button(__("Purchase Receipt"), __("Create"));
+    frm.remove_custom_button(__("Purchase Receipt"));
+}
 
 
 /**

@@ -236,6 +236,7 @@ class TestProcessorFirstDraftSCR(unittest.TestCase):
             frappe._dict(
                 v2_processor_first_draft_entry=1,
                 v2_processor_first_draft_scr=1,
+                v2_processor_first_scr_submit=1,
             ),
         ):
             self.assertEqual(
@@ -243,6 +244,7 @@ class TestProcessorFirstDraftSCR(unittest.TestCase):
                 {
                     "draft_entry_enabled": True,
                     "draft_scr_enabled": True,
+                    "scr_submit_enabled": True,
                 },
             )
 
@@ -251,6 +253,10 @@ class TestProcessorFirstDraftSCR(unittest.TestCase):
             custom_processor_lot_receipt="PLR-V2"
         )
         with patch.object(
+            subcontracting_receipt.frappe,
+            "conf",
+            frappe._dict(v2_processor_first_scr_submit=0),
+        ), patch.object(
             subcontracting_receipt.frappe.db,
             "get_value",
             return_value=frappe._dict(

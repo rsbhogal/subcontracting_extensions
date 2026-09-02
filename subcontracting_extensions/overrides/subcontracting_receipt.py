@@ -481,6 +481,38 @@ def _set_mapped_pr_posting_date(
 	)
 
 
+def _block_processor_first_v2_purchase_receipt(source_doc):
+	"""Keep PR creation outside the J6 SCR-submission checkpoint."""
+	plr_name = source_doc.get("custom_processor_lot_receipt")
+	if not plr_name:
+		return
+
+	plr = frappe.db.get_value(
+		"Processor Lot Receipt",
+		plr_name,
+		[
+			"receipt_structure_version",
+			"processor_first_draft_only",
+		],
+		as_dict=True,
+	)
+	if not plr:
+		return
+
+	if (
+		plr.receipt_structure_version == "V2 Itemized"
+		and plr.processor_first_draft_only
+	):
+		frappe.throw(
+			_(
+				"Purchase Receipt creation is not enabled for processor-first "
+				"V2 checkpoint receipts. Complete the SCR submission trial "
+				"without creating later documents."
+			),
+			title=_("V2 Purchase Receipt Checkpoint"),
+		)
+
+
 @frappe.whitelist()
 def make_purchase_receipt(
 	source_name,
@@ -502,6 +534,8 @@ def make_purchase_receipt(
 		)
 	else:
 		source_doc = source_name
+
+	_block_processor_first_v2_purchase_receipt(source_doc)
 
 	if source_doc.is_return:
 		return

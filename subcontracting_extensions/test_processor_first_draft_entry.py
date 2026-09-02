@@ -221,9 +221,17 @@ class TestProcessorFirstDraftEntry(unittest.TestCase):
                 entry.review_draft(data)
 
     def test_get_entry_mode_exposes_only_boolean(self):
-        self.assertEqual(entry.get_entry_mode(), {"draft_entry_enabled": True})
+        self.assertEqual(entry.get_entry_mode(), {
+            "draft_entry_enabled": True,
+            "draft_scr_enabled": False,
+            "scr_submit_enabled": False,
+        })
         entry.frappe.conf.v2_processor_first_draft_entry = 0
-        self.assertEqual(entry.get_entry_mode(), {"draft_entry_enabled": False})
+        self.assertEqual(entry.get_entry_mode(), {
+            "draft_entry_enabled": False,
+            "draft_scr_enabled": False,
+            "scr_submit_enabled": False,
+        })
 
     def test_allocation_review_does_not_echo_unknown_parent_fields(self):
         result = entry.review_draft(self.payload())
@@ -244,7 +252,11 @@ class TestProcessorFirstDraftDownstreamGuards(unittest.TestCase):
 
     def test_downstream_entry_points_stop_on_the_j2_marker(self):
         doc = Record(processor_first_draft_only=1)
-        with patch.object(controller.frappe, "get_doc", return_value=doc), patch.object(
+        with patch.object(
+            controller.frappe,
+            "conf",
+            frappe._dict(v2_processor_first_draft_scr=0),
+        ), patch.object(controller.frappe, "get_doc", return_value=doc), patch.object(
             controller.frappe.db, "exists", return_value=True,
         ):
             for function in (
@@ -253,14 +265,24 @@ class TestProcessorFirstDraftDownstreamGuards(unittest.TestCase):
                 controller.refresh_draft_subcontracting_receipt,
                 controller.make_subcontracting_receipt,
             ):
-                with self.subTest(function=function.__name__), self.assertRaisesRegex(frappe.ValidationError, "Downstream document"):
+                with self.subTest(function=function.__name__), self.assertRaisesRegex(frappe.ValidationError, "controlled checkpoint"):
                     function("PLR-J2")
 
     def test_guard_allows_legacy_and_blocks_j2(self):
         controller._block_processor_first_downstream(Record(processor_first_draft_only=0))
-        with self.assertRaisesRegex(frappe.ValidationError, "Downstream document"):
-            controller._block_processor_first_downstream(Record(processor_first_draft_only=1))
+        with patch.object(
+            controller.frappe,
+            "conf",
+            frappe._dict(v2_processor_first_draft_scr=0),
+        ), self.assertRaisesRegex(frappe.ValidationError, "controlled checkpoint"):
+            controller._block_processor_first_downstream(
+                Record(processor_first_draft_only=1)
+            )
 
     def test_scr_validation_stops_before_document_lookup(self):
-        with self.assertRaisesRegex(frappe.ValidationError, "Downstream document"):
+        with patch.object(
+            controller.frappe,
+            "conf",
+            frappe._dict(v2_processor_first_draft_scr=0),
+        ), self.assertRaisesRegex(frappe.ValidationError, "controlled checkpoint"):
             controller._validate_scr_creation(Record(processor_first_draft_only=1))

@@ -110,6 +110,13 @@ def get_entry_mode():
                 )
             )
         ),
+        "scr_submit_enabled": bool(
+            cint(
+                frappe.conf.get(
+                    "v2_processor_first_scr_submit"
+                )
+            )
+        ),
     }
 
 
