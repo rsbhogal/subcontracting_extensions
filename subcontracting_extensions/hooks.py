@@ -269,6 +269,10 @@ doc_events = {
 		"validate": (
 			"subcontracting_extensions.scripts.subcontracting_receipt.validate"
 		),
+		"before_submit": (
+			"subcontracting_extensions.scripts.subcontracting_receipt."
+			"prevent_processor_first_checkpoint_submit"
+		),
 		"after_insert": (
 			"subcontracting_extensions.scripts.subcontracting_receipt."
 			"after_insert"

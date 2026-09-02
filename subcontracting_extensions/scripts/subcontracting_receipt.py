@@ -80,6 +80,37 @@ def validate(doc, method=None):
 		)
 
 
+def prevent_processor_first_checkpoint_submit(doc, method=None):
+	"""Keep a processor-first J5 SCR in Draft until submit support exists."""
+	if not doc.custom_processor_lot_receipt:
+		return
+
+	plr = frappe.db.get_value(
+		"Processor Lot Receipt",
+		doc.custom_processor_lot_receipt,
+		[
+			"receipt_structure_version",
+			"processor_first_draft_only",
+		],
+		as_dict=True,
+	)
+	if not plr:
+		return
+
+	if (
+		plr.receipt_structure_version == "V2 Itemized"
+		and plr.processor_first_draft_only
+	):
+		frappe.throw(
+			_(
+				"Subcontracting Receipt submission is not enabled for "
+				"processor-first V2 checkpoint receipts. Keep this "
+				"document in Draft."
+			),
+			title=_("Draft SCR Checkpoint"),
+		)
+
+
 def after_insert(doc, method=None):
 	"""
 	Write the newly saved SCR reference back into its Processor Lot Receipt.

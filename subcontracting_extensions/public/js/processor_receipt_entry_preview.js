@@ -10,6 +10,7 @@ frappe.provide("frappe.subcontracting_entry_preview");
     api.open = async function () {
         const mode = await frappe.call({method: "subcontracting_extensions.receipt_entry_preview.get_entry_mode"});
         const draft_mode = Boolean(mode.message.draft_entry_enabled);
+        const draft_scr_mode = Boolean(mode.message.draft_scr_enabled);
         let snapshot = null;
         let request_id = 0;
         const context = () => ({
@@ -27,7 +28,9 @@ frappe.provide("frappe.subcontracting_entry_preview");
             size: "extra-large",
             fields: [
                 {fieldtype: "HTML", options: `<p>${escape(__(draft_mode
-                    ? "Select the processor and warehouse, then the invoiced items. Draft saving affects lot balances; downstream documents remain disabled."
+                    ? draft_scr_mode
+                        ? "Select the processor and warehouse, then the invoiced items. A saved and reviewed receipt may create one Draft Subcontracting Receipt."
+                        : "Select the processor and warehouse, then the invoiced items. Draft saving affects lot balances; downstream documents remain disabled."
                     : "Select the processor and warehouse, then find compatible lots. This trial cannot save a receipt or reserve capacity."))}</p>`},
                 {fieldname: "company", fieldtype: "Link", options: "Company", label: __("Company"), reqd: 1,
                     default: frappe.defaults.get_user_default("Company"), onchange: invalidate},
@@ -205,6 +208,52 @@ frappe.provide("frappe.subcontracting_entry_preview");
         paint_draft(frm);
     };
 
+    api.setup_draft_page_actions = function (frm, state) {
+        frm.clear_custom_buttons();
+
+        if (typeof add_subcontracting_workspace_button === "function") {
+            add_subcontracting_workspace_button(frm);
+        }
+
+        if (frm.is_new()) return;
+
+        if (frm.doc.subcontracting_receipt) {
+            frm.add_custom_button(
+                __("Subcontracting Receipt"),
+                () => frappe.set_route(
+                    "Form",
+                    "Subcontracting Receipt",
+                    frm.doc.subcontracting_receipt
+                ),
+                __("View")
+            );
+            return;
+        }
+
+        if (!state.draft_scr_enabled) return;
+
+        frm.add_custom_button(
+            __("Subcontracting Receipt"),
+            () => {
+                if (frm.is_dirty()) {
+                    frappe.msgprint(__(
+                        "Save and reopen the Processor Lot Receipt before creating its Draft Subcontracting Receipt."
+                    ));
+                    return;
+                }
+                frappe.model.open_mapped_doc({
+                    method:
+                        "subcontracting_extensions.subcontracting_extensions.doctype." +
+                        "processor_lot_receipt.processor_lot_receipt." +
+                        "make_subcontracting_receipt",
+                    frm,
+                    freeze_message: __("Creating Draft Subcontracting Receipt ...")
+                });
+            },
+            __("Create")
+        );
+    };
+
     api.render_draft = async function (frm) {
         if (!frm.__j2_original_fields) {
             frm.__j2_original_fields = frm.meta.fields.map(field => project(field, ["fieldname", "hidden", "read_only", "label"]));
@@ -215,8 +264,9 @@ frappe.provide("frappe.subcontracting_entry_preview");
         const state = frm.__j2_state;
         const current_request = ++state.request;
         state.enabled = false;
+        state.draft_scr_enabled = false;
         frm.meta.fields.forEach(field => frm.toggle_display(field.fieldname, field.fieldname === "processor_first_draft_html"));
-        frm.clear_custom_buttons();
+        api.setup_draft_page_actions(frm, state);
         frm.disable_save();
         paint_draft(frm);
         let response;
@@ -231,11 +281,15 @@ frappe.provide("frappe.subcontracting_entry_preview");
         }
         if (frm.__j2_state !== state || state.request !== current_request || frm.doc.name !== state.name) return;
         state.enabled = Boolean(response.message.draft_entry_enabled) && !is_linked(frm);
+        state.draft_scr_enabled = Boolean(response.message.draft_scr_enabled);
         if (state.enabled) frm.enable_save();
         if (!frm.is_new() && !frm.is_dirty()) state.reviewed = signature(frm);
         frm.set_intro(__(state.enabled
-            ? "J4 DRAFT ONLY: enter measurements and quantities, then Review FIFO Allocations before Save. Saving changes lot balances but creates no stock or accounting documents."
+            ? state.draft_scr_enabled
+                ? "J5 DRAFT SCR CHECKPOINT: review and save physical facts before creating one Draft Subcontracting Receipt. SCR submission and later documents remain disabled."
+                : "J4 DRAFT ONLY: enter measurements and quantities, then Review FIFO Allocations before Save. Saving changes lot balances but creates no stock or accounting documents."
             : "Draft entry is disabled on this site, or this receipt already has downstream documents. This view is read-only."), "orange");
+        api.setup_draft_page_actions(frm, state);
         paint_draft(frm);
     };
 
@@ -299,7 +353,9 @@ frappe.provide("frappe.subcontracting_entry_preview");
                     <tbody>${(doc.lot_allocations || []).map(row => `<tr><td>${escape(row.receipt_item_key)}<br>${escape(row.stock_uom)}</td><td>${escape(row.processor_lot)}<br>${escape(row.subcontracting_order)}</td>
                         <td>${quantity(row.available_qty)}</td><td>${quantity(row.allocated_accepted_qty)}</td><td>${quantity(row.allocated_invoice_qty)}</td></tr>`).join("")}</tbody>
                 </table></div>
-                <p class="text-muted">${escape(__("J4 supports distinct finished items within a lot using item-specific FIFO. Duplicate item/UOM source rows, allocation overrides, material credit and downstream document actions remain disabled."))}</p>
+                <p class="text-muted">${escape(__(state.draft_scr_enabled
+                    ? "J5 can create one Draft SCR from exact item/allocation lineage. SCR submission, allocation overrides, material credit and later documents remain disabled."
+                    : "J4 supports distinct finished items within a lot using item-specific FIFO. Duplicate item/UOM source rows, allocation overrides, material credit and downstream document actions remain disabled."))}</p>
             </div>`);
         wrapper.off("click.processorFirst").on("click.processorFirst", "[data-j2-action]", function () {
             if (!state.enabled || state.busy) return;

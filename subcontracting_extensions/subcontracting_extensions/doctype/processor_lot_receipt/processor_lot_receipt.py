@@ -30,10 +30,32 @@ V2_RECEIPT_STRUCTURE = "V2 Itemized"
 ITEM_QUANTITY_PRECISION = 6
 
 
-def _block_processor_first_downstream(plr) -> None:
-	"""J2 drafts may not start a downstream transaction through these actions."""
-	if getattr(plr, "processor_first_draft_only", 0):
-		frappe.throw(_("This processor-first receipt is a draft-entry checkpoint. Downstream document creation is not enabled yet."))
+def _block_processor_first_downstream(
+	plr,
+	*,
+	allow_draft_scr: bool = False,
+) -> None:
+	"""Keep processor-first actions behind explicit site checkpoints."""
+	if not getattr(plr, "processor_first_draft_only", 0):
+		return
+
+	if (
+		allow_draft_scr
+		and cint(
+			frappe.conf.get(
+				"v2_processor_first_draft_scr"
+			)
+		)
+	):
+		return
+
+	frappe.throw(
+		_(
+			"This processor-first receipt is a controlled checkpoint. "
+			"Only Draft Subcontracting Receipt creation may be enabled "
+			"explicitly on the current site."
+		)
+	)
 
 
 def _calculate_material_credit_invoice_qty(
@@ -2353,21 +2375,44 @@ def make_subcontracting_receipt(source_name, target_doc=None):
 
 
 def _make_v2_subcontracting_receipt(processor_lot_receipt, target_doc=None):
-	"""Map V2 allocations to exact SCR rows in one target document."""
+	"""Map each source SCO once, then size its exact allocated SCR rows.
+
+	A multi-item Processor Lot can contribute more than one receipt item to the
+	same truck. Mapping once per allocation would therefore map the same SCO
+	repeatedly. Grouping by SCO preserves ERPNext's document mapper while exact
+	SCO-item / PO-item lineage keeps every allocation attached to the right row.
+	"""
 	from erpnext.subcontracting.doctype.subcontracting_order.subcontracting_order import (
 		get_mapped_subcontracting_receipt,
 	)
 
-	seen_processor_lots = set()
+	allocations_by_sco = {}
+	seen_lineages = set()
+
 	for allocation in processor_lot_receipt.lot_allocations:
-		if allocation.processor_lot in seen_processor_lots:
+		lineage = (
+			allocation.subcontracting_order_item,
+			allocation.purchase_order_item,
+		)
+		if not all(lineage):
 			frappe.throw(
-				_("Processor Lot {0} occurs more than once.").format(
-					frappe.bold(allocation.processor_lot)
+				_("Allocation row {0} has incomplete order-item lineage.").format(
+					allocation.idx
 				),
-				title=_("Duplicate Processor Lot Allocation"),
+				title=_("Incomplete Allocation Lineage"),
 			)
-		seen_processor_lots.add(allocation.processor_lot)
+		if lineage in seen_lineages:
+			frappe.throw(
+				_(
+					"Allocation row {0} repeats SCO Item {1} and PO Item {2}."
+				).format(
+					allocation.idx,
+					frappe.bold(lineage[0]),
+					frappe.bold(lineage[1]),
+				),
+				title=_("Duplicate Allocation Lineage"),
+			)
+		seen_lineages.add(lineage)
 
 		allocated_qty = flt(
 			allocation.allocated_accepted_qty,
@@ -2381,52 +2426,92 @@ def _make_v2_subcontracting_receipt(processor_lot_receipt, target_doc=None):
 				title=_("Invalid Lot Allocation"),
 			)
 
+		allocations_by_sco.setdefault(
+			allocation.subcontracting_order,
+			[],
+		).append(allocation)
+
+	for subcontracting_order, allocations in allocations_by_sco.items():
 		item_count_before_mapping = len(target_doc.items) if target_doc else 0
 		target_doc = get_mapped_subcontracting_receipt(
-			allocation.subcontracting_order,
+			subcontracting_order,
 			target_doc,
 		)
 		new_items = target_doc.items[item_count_before_mapping:]
-		matching_rows = [
-			row
-			for row in new_items
-			if row.subcontracting_order_item
-			== allocation.subcontracting_order_item
-			and row.purchase_order_item
-			== allocation.purchase_order_item
-		]
+		expected_by_lineage = {
+			(
+				allocation.subcontracting_order_item,
+				allocation.purchase_order_item,
+			): allocation
+			for allocation in allocations
+		}
+		mapped_by_lineage = {}
+		unexpected_rows = []
 
-		if len(new_items) != 1 or len(matching_rows) != 1:
+		for item in new_items:
+			lineage = (
+				item.subcontracting_order_item,
+				item.purchase_order_item,
+			)
+			if lineage not in expected_by_lineage:
+				unexpected_rows.append(item)
+				continue
+			if lineage in mapped_by_lineage:
+				frappe.throw(
+					_(
+						"Subcontracting Order {0} mapped duplicate SCR rows "
+						"for SCO Item {1} and PO Item {2}."
+					).format(
+						frappe.bold(subcontracting_order),
+						frappe.bold(lineage[0]),
+						frappe.bold(lineage[1]),
+					),
+					title=_("Ambiguous Subcontracting Order Mapping"),
+				)
+			mapped_by_lineage[lineage] = item
+
+		missing_lineages = [
+			lineage
+			for lineage in expected_by_lineage
+			if lineage not in mapped_by_lineage
+		]
+		if unexpected_rows or missing_lineages:
 			frappe.throw(
 				_(
-					"Subcontracting Order {0} must map exactly one row for "
-					"SCO Item {1} and PO Item {2}; ERPNext mapped {3} new "
-					"row(s), of which {4} matched."
+					"Subcontracting Order {0} did not map exactly the rows "
+					"represented by this receipt. Expected {1}, matched {2}, "
+					"and found {3} additional open row(s)."
 				).format(
-					frappe.bold(allocation.subcontracting_order),
-					frappe.bold(allocation.subcontracting_order_item),
-					frappe.bold(allocation.purchase_order_item),
-					len(new_items),
-					len(matching_rows),
+					frappe.bold(subcontracting_order),
+					len(expected_by_lineage),
+					len(mapped_by_lineage),
+					len(unexpected_rows),
 				),
 				title=_("Ambiguous Subcontracting Order Mapping"),
 			)
 
-		item = matching_rows[0]
-		if (
-			item.item_code != allocation.processed_item
-			or item.stock_uom != allocation.stock_uom
-		):
-			frappe.throw(
-				_("Mapped SCR row does not match Allocation row {0}.").format(
-					allocation.idx
-				),
-				title=_("Mapped SCR Item Mismatch"),
-			)
+		for lineage, allocation in expected_by_lineage.items():
+			item = mapped_by_lineage[lineage]
+			if (
+				item.item_code != allocation.processed_item
+				or item.stock_uom != allocation.stock_uom
+			):
+				frappe.throw(
+					_(
+						"Mapped SCR row does not match Allocation row {0}."
+					).format(allocation.idx),
+					title=_("Mapped SCR Item Mismatch"),
+				)
 
-		item.qty = allocated_qty
-		item.rejected_qty = 0
-		item.branch = target_doc.branch or processor_lot_receipt.get("branch")
+			item.qty = flt(
+				allocation.allocated_accepted_qty,
+				ITEM_QUANTITY_PRECISION,
+			)
+			item.rejected_qty = 0
+			item.branch = (
+				target_doc.branch
+				or processor_lot_receipt.get("branch")
+			)
 
 	target_doc.custom_processor_lot = processor_lot_receipt.processor_lot
 	target_doc.custom_processor_lot_receipt = processor_lot_receipt.name
@@ -2486,7 +2571,10 @@ def refresh_draft_subcontracting_receipt(
         processor_lot_receipt,
     )
 
-    _block_processor_first_downstream(plr)
+    _block_processor_first_downstream(
+        plr,
+        allow_draft_scr=True,
+    )
 
     existing_scr = plr.subcontracting_receipt
 
@@ -2608,7 +2696,10 @@ def refresh_draft_subcontracting_receipt(
 
 def _validate_scr_creation(processor_lot_receipt) -> None:
 	"""Validate that the PLR is ready to create its SCR."""
-	_block_processor_first_downstream(processor_lot_receipt)
+	_block_processor_first_downstream(
+		processor_lot_receipt,
+		allow_draft_scr=True,
+	)
 	if processor_lot_receipt.is_new():
 		frappe.throw(
 			_("Please save the Processor Lot Receipt first.")

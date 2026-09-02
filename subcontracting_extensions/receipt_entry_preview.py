@@ -95,7 +95,22 @@ def get_candidates(company, supplier, supplier_warehouse=None):
 @frappe.whitelist()
 def get_entry_mode():
     """Read the site opt-in; this does not confer document permissions."""
-    return {"draft_entry_enabled": bool(cint(frappe.conf.get("v2_processor_first_draft_entry")))}
+    return {
+        "draft_entry_enabled": bool(
+            cint(
+                frappe.conf.get(
+                    "v2_processor_first_draft_entry"
+                )
+            )
+        ),
+        "draft_scr_enabled": bool(
+            cint(
+                frappe.conf.get(
+                    "v2_processor_first_draft_scr"
+                )
+            )
+        ),
+    }
 
 
 HEADER_INPUTS = (
