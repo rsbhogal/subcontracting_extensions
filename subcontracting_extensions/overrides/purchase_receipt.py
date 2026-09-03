@@ -5,6 +5,7 @@
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 from subcontracting_extensions.overrides.posting_date_flow import (
 	set_downstream_posting_datetime,
@@ -106,15 +107,16 @@ def make_purchase_invoice(
 			as_dict=True,
 		)
 		if plr and plr.receipt_structure_version == "V2 Itemized" and plr.processor_first_draft_only:
-			checkpoint = (
-				"J8 Purchase Receipt submission checkpoint"
-				if frappe.conf.get("v2_processor_first_pr_submit")
-				else "J7 Draft Purchase Receipt checkpoint"
-			)
-			frappe.throw(
-				_("Purchase Invoice creation is not enabled at the {0}.").format(checkpoint),
-				title=_("V2 Purchase Invoice Checkpoint"),
-			)
+			if not cint(frappe.conf.get("v2_processor_first_draft_pi")):
+				checkpoint = (
+					"J8 Purchase Receipt submission checkpoint"
+					if frappe.conf.get("v2_processor_first_pr_submit")
+					else "J7 Draft Purchase Receipt checkpoint"
+				)
+				frappe.throw(
+					_("Purchase Invoice creation is not enabled at the {0}.").format(checkpoint),
+					title=_("V2 Purchase Invoice Checkpoint"),
+				)
 	purchase_invoice = erpnext_make_purchase_invoice(
 		source_name,
 		target_doc=target_doc,
@@ -127,5 +129,13 @@ def make_purchase_invoice(
 			purchase_receipt,
 		)
 		_set_purchase_order_payment_terms(purchase_invoice)
+		from subcontracting_extensions.scripts.purchase_invoice import (
+			validate_processor_first_draft_purchase_invoice,
+		)
+
+		validate_processor_first_draft_purchase_invoice(
+			purchase_invoice,
+			purchase_receipt=purchase_receipt,
+		)
 
 	return purchase_invoice

@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from subcontracting_extensions.subcontracting_extensions.doctype.processor_lot_receipt import (
@@ -159,12 +160,19 @@ class TestPostingDateFlow(FrappeTestCase):
 			"get_doc",
 			return_value=source,
 		), patch.object(
+			purchase_receipt.frappe,
+			"conf",
+			frappe._dict(v2_processor_first_draft_pi=1),
+		), patch.object(
 			purchase_receipt,
 			"_is_processor_lot_purchase_receipt",
 			return_value=True,
 		), patch.object(
 			purchase_receipt,
 			"_set_purchase_order_payment_terms",
+		), patch(
+			"subcontracting_extensions.scripts.purchase_invoice."
+			"validate_processor_first_draft_purchase_invoice",
 		), patch(
 			"erpnext.stock.doctype.purchase_receipt."
 			"purchase_receipt.make_purchase_invoice",

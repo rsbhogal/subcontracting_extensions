@@ -100,10 +100,20 @@ doc_events = {
 			"subcontracting_extensions.scripts.purchase_document_naming."
 			"set_posting_date_name"
 		),
-		"validate": (
-			"subcontracting_extensions.subcontracting_extensions.doctype."
-			"processor_lot_receipt.processor_lot_receipt."
-			"validate_purchase_invoice_supplier_identity"
+		"validate": [
+			(
+				"subcontracting_extensions.scripts.purchase_invoice."
+				"validate_processor_first_draft_purchase_invoice"
+			),
+			(
+				"subcontracting_extensions.subcontracting_extensions.doctype."
+				"processor_lot_receipt.processor_lot_receipt."
+				"validate_purchase_invoice_supplier_identity"
+			),
+		],
+		"before_submit": (
+			"subcontracting_extensions.scripts.purchase_invoice."
+			"prevent_processor_first_purchase_invoice_submit"
 		),
 		"after_insert": (
 			"subcontracting_extensions.subcontracting_extensions.doctype."
