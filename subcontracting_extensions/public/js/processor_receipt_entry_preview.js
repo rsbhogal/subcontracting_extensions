@@ -189,6 +189,11 @@ frappe.provide("frappe.subcontracting_entry_preview");
         return Number(text);
     };
     api.draft_numeric = numeric;
+    api.downstream_documents = doc => [
+        {label: "Subcontracting Receipt", doctype: "Subcontracting Receipt", name: doc.subcontracting_receipt || null},
+        {label: "Purchase Receipt", doctype: "Purchase Receipt", name: doc.purchase_receipt || null},
+        {label: "Purchase Invoice", doctype: "Purchase Invoice", name: doc.purchase_invoice || null},
+    ];
     api.draft_payload = frm => {
         const child_rows = (rows, fields) => (rows || []).map(row => {
             const result = project(row, fields);
@@ -323,6 +328,7 @@ frappe.provide("frappe.subcontracting_entry_preview");
         const button = (action, label, index = "") => `<button type="button" class="btn btn-default btn-sm" data-j2-action="${action}" data-index="${index}" ${disabled ? "disabled" : ""}>${escape(__(label))}</button>`;
         const doc = frm.doc;
         const items = doc.receipt_items || [];
+        const downstream_documents = api.downstream_documents(doc);
         wrapper.html(`
             <div class="p-3">
                 <h4>${escape(__("Processor Context"))}</h4>
@@ -359,6 +365,13 @@ frappe.provide("frappe.subcontracting_entry_preview");
                     <tbody>${(doc.lot_allocations || []).map(row => `<tr><td>${escape(row.receipt_item_key)}<br>${escape(row.stock_uom)}</td><td>${escape(row.processor_lot)}<br>${escape(row.subcontracting_order)}</td>
                         <td>${quantity(row.available_qty)}</td><td>${quantity(row.allocated_accepted_qty)}</td><td>${quantity(row.allocated_invoice_qty)}</td></tr>`).join("")}</tbody>
                 </table></div>
+                <h4 class="mt-4">${escape(__("Downstream Documents"))}</h4>
+                <div class="table-responsive"><table class="table table-bordered table-sm">
+                    <thead><tr><th>${escape(__("Document"))}</th><th>${escape(__("Reference"))}</th></tr></thead>
+                    <tbody>${downstream_documents.map(row => `<tr><td>${escape(__(row.label))}</td><td>${row.name
+                        ? `<a href="#" class="text-primary text-decoration-underline" data-j2-document="${escape(row.doctype)}" data-j2-name="${escape(row.name)}">${escape(row.name)}</a>`
+                        : `<span class="text-muted">${escape(__("Not Created"))}</span>`}</td></tr>`).join("")}</tbody>
+                </table></div>
                 <p class="text-muted">${escape(__(state.draft_scr_enabled
                     ? "J5 can create one Draft SCR from exact item/allocation lineage. SCR submission, allocation overrides, material credit and later documents remain disabled."
                     : "J4 supports distinct finished items within a lot using item-specific FIFO. Duplicate item/UOM source rows, allocation overrides, material credit and downstream document actions remain disabled."))}</p>
@@ -371,6 +384,9 @@ frappe.provide("frappe.subcontracting_entry_preview");
             if (action === "item") edit_item(frm, index);
             if (action === "weighments") api.edit_weighments(frm);
             if (action === "review") review_draft(frm);
+        }).on("click.processorFirst", "[data-j2-document]", function (event) {
+            event.preventDefault();
+            frappe.set_route("Form", this.dataset.j2Document, this.dataset.j2Name);
         });
     }
 

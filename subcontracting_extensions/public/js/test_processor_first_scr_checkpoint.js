@@ -3,6 +3,7 @@ const fs = require("fs");
 const vm = require("vm");
 
 const handlers = {};
+let draftPrEnabled = false;
 global.__ = value => value;
 global.frappe = {
     ui: {
@@ -13,15 +14,13 @@ global.frappe = {
         },
         Dialog: function () {},
     },
-    db: {
-        async get_value() {
-            return {
-                message: {
-                    receipt_structure_version: "V2 Itemized",
-                    processor_first_draft_only: 1,
-                },
-            };
-        },
+    async call() {
+        return {
+            message: {
+                checkpoint: true,
+                draft_pr_enabled: draftPrEnabled,
+            },
+        };
     },
 };
 
@@ -51,6 +50,21 @@ vm.runInThisContext(source, {filename: "subcontracting_receipt.js"});
         ["Purchase Receipt", undefined],
     ]);
 
+    draftPrEnabled = true;
+    const enabledRemoved = [];
+    await handlers["Subcontracting Receipt"].refresh({
+        doc: {
+            name: "MAT-SCR-V2",
+            docstatus: 1,
+            custom_processor_lot_receipt: "PLR-V2",
+        },
+        remove_custom_button(label, group) {
+            enabledRemoved.push([label, group]);
+        },
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepStrictEqual(enabledRemoved, []);
+
     const draft = {
         doc: {
             docstatus: 0,
@@ -63,7 +77,7 @@ vm.runInThisContext(source, {filename: "subcontracting_receipt.js"});
     await handlers["Subcontracting Receipt"].refresh(draft);
 
     console.log(
-        "J6 submitted SCR Purchase Receipt action gate: PASS"
+        "J7 submitted SCR Draft Purchase Receipt action gate: PASS"
     );
 })().catch(error => {
     console.error(error);

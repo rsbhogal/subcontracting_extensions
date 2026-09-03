@@ -20,16 +20,17 @@ async function hide_processor_first_purchase_receipt_action(frm) {
         return;
     }
 
-    const response = await frappe.db.get_value(
-        "Processor Lot Receipt",
-        frm.doc.custom_processor_lot_receipt,
-        ["receipt_structure_version", "processor_first_draft_only"]
-    );
-    const plr = response && response.message;
+    const response = await frappe.call({
+        method:
+            "subcontracting_extensions.overrides.subcontracting_receipt." +
+            "get_processor_first_draft_pr_mode",
+        args: {source_name: frm.doc.name},
+    });
+    const mode = response && response.message;
     if (
-        !plr
-        || plr.receipt_structure_version !== "V2 Itemized"
-        || !plr.processor_first_draft_only
+        !mode
+        || !mode.checkpoint
+        || mode.draft_pr_enabled
     ) {
         return;
     }

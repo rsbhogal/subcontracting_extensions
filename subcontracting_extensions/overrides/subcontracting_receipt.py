@@ -481,11 +481,11 @@ def _set_mapped_pr_posting_date(
 	)
 
 
-def _block_processor_first_v2_purchase_receipt(source_doc):
-	"""Keep PR creation outside the J6 SCR-submission checkpoint."""
+def _processor_first_v2_plr(source_doc):
+	"""Return checkpoint PLR facts for a linked processor-first V2 SCR."""
 	plr_name = source_doc.get("custom_processor_lot_receipt")
 	if not plr_name:
-		return
+		return None
 
 	plr = frappe.db.get_value(
 		"Processor Lot Receipt",
@@ -493,24 +493,72 @@ def _block_processor_first_v2_purchase_receipt(source_doc):
 		[
 			"receipt_structure_version",
 			"processor_first_draft_only",
+			"purchase_receipt",
 		],
 		as_dict=True,
 	)
+	if plr and (
+		plr.receipt_structure_version == "V2 Itemized"
+		and plr.processor_first_draft_only
+	):
+		return plr
+	return None
+
+
+@frappe.whitelist()
+def get_processor_first_draft_pr_mode(source_name):
+	"""Return whether the submitted checkpoint SCR may create a Draft PR."""
+	source_doc = frappe.get_doc("Subcontracting Receipt", source_name)
+	source_doc.check_permission("read")
+	return {
+		"checkpoint": bool(_processor_first_v2_plr(source_doc)),
+		"draft_pr_enabled": bool(
+			frappe.utils.cint(
+				frappe.conf.get("v2_processor_first_draft_pr")
+			)
+		),
+	}
+
+
+def _block_processor_first_v2_purchase_receipt(source_doc, *, submit=False):
+	"""Permit only controlled Draft PR creation at the J7 checkpoint."""
+	plr = _processor_first_v2_plr(source_doc)
 	if not plr:
 		return
 
-	if (
-		plr.receipt_structure_version == "V2 Itemized"
-		and plr.processor_first_draft_only
+	if not frappe.utils.cint(
+		frappe.conf.get("v2_processor_first_draft_pr")
 	):
 		frappe.throw(
 			_(
 				"Purchase Receipt creation is not enabled for processor-first "
-				"V2 checkpoint receipts. Complete the SCR submission trial "
-				"without creating later documents."
+				"V2 checkpoint receipts on this site."
 			),
 			title=_("V2 Purchase Receipt Checkpoint"),
 		)
+	if source_doc.docstatus != 1:
+		frappe.throw(
+			_("Submit Subcontracting Receipt {0} before creating its Purchase Receipt.").format(
+				frappe.bold(source_doc.name)
+			),
+			title=_("Submitted SCR Required"),
+		)
+	if submit:
+		frappe.throw(
+			_("Purchase Receipt submission is not enabled at the J7 Draft PR checkpoint."),
+			title=_("Draft Purchase Receipt Checkpoint"),
+		)
+	if plr.purchase_receipt:
+		status = frappe.db.get_value(
+			"Purchase Receipt", plr.purchase_receipt, "docstatus"
+		)
+		if status != 2:
+			frappe.throw(
+				_("Processor Lot Receipt already links to Purchase Receipt {0}.").format(
+					frappe.bold(plr.purchase_receipt)
+				),
+				title=_("Purchase Receipt Already Exists"),
+			)
 
 
 @frappe.whitelist()
@@ -535,7 +583,10 @@ def make_purchase_receipt(
 	else:
 		source_doc = source_name
 
-	_block_processor_first_v2_purchase_receipt(source_doc)
+	_block_processor_first_v2_purchase_receipt(
+		source_doc,
+		submit=submit,
+	)
 
 	if source_doc.is_return:
 		return

@@ -153,6 +153,14 @@ doc_events = {
 			"processor_lot_receipt.processor_lot_receipt."
 			"link_purchase_receipt"
 		),
+		"validate": (
+			"subcontracting_extensions.scripts.purchase_receipt."
+			"validate_processor_first_draft_purchase_receipt"
+		),
+		"before_submit": (
+			"subcontracting_extensions.scripts.purchase_receipt."
+			"prevent_processor_first_purchase_receipt_submit"
+		),
 		"on_submit": (
 			"subcontracting_extensions.subcontracting_extensions.doctype."
 			"processor_lot_receipt.processor_lot_receipt."

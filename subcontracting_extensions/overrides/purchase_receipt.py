@@ -93,6 +93,23 @@ def make_purchase_invoice(
 		"Purchase Receipt",
 		source_name,
 	)
+	if _is_processor_lot_purchase_receipt(purchase_receipt):
+		plr_name = frappe.db.get_value(
+			"Subcontracting Receipt",
+			purchase_receipt.subcontracting_receipt,
+			"custom_processor_lot_receipt",
+		)
+		plr = frappe.db.get_value(
+			"Processor Lot Receipt",
+			plr_name,
+			["receipt_structure_version", "processor_first_draft_only"],
+			as_dict=True,
+		)
+		if plr and plr.receipt_structure_version == "V2 Itemized" and plr.processor_first_draft_only:
+			frappe.throw(
+				_("Purchase Invoice creation is not enabled at the J7 Draft PR checkpoint."),
+				title=_("V2 Purchase Invoice Checkpoint"),
+			)
 	purchase_invoice = erpnext_make_purchase_invoice(
 		source_name,
 		target_doc=target_doc,

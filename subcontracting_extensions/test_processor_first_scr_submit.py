@@ -259,6 +259,10 @@ class TestProcessorFirstSCRSubmit(unittest.TestCase):
 
     def test_manual_purchase_receipt_is_blocked(self):
         with patch.object(
+            receipt_override.frappe,
+            "conf",
+            frappe._dict(v2_processor_first_draft_pr=0),
+        ), patch.object(
             receipt_override.frappe.db,
             "get_value",
             return_value=frappe._dict(

@@ -48,6 +48,18 @@ assert.strictEqual(
     "function"
 );
 
+assert.deepStrictEqual(
+    actions.downstream_documents({
+        subcontracting_receipt: "MAT-SCR-V2",
+        purchase_receipt: "RN-V2",
+    }),
+    [
+        {label: "Subcontracting Receipt", doctype: "Subcontracting Receipt", name: "MAT-SCR-V2"},
+        {label: "Purchase Receipt", doctype: "Purchase Receipt", name: "RN-V2"},
+        {label: "Purchase Invoice", doctype: "Purchase Invoice", name: null},
+    ]
+);
+
 function form({dirty = false, receipt = null, isNew = false} = {}) {
     const buttons = [];
     return {
