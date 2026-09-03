@@ -4,6 +4,10 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
+from subcontracting_extensions.overrides.posting_date_flow import (
+	set_downstream_posting_datetime,
+)
+
 
 PRECISION = 6
 
@@ -142,9 +146,17 @@ def validate_processor_first_draft_purchase_invoice(
 
 
 def prevent_processor_first_purchase_invoice_submit(doc, method=None):
-	if not _checkpoint_context(doc):
+	context = _checkpoint_context(doc)
+	if not context:
 		return
-	frappe.throw(
-		_("Purchase Invoice submission is not enabled at the J9 Draft Purchase Invoice checkpoint."),
-		title=_("Draft Purchase Invoice Checkpoint"),
-	)
+	if not cint(frappe.conf.get("v2_processor_first_pi_submit")):
+		frappe.throw(
+			_("Purchase Invoice submission is not enabled at the J9 Draft Purchase Invoice checkpoint."),
+			title=_("Draft Purchase Invoice Checkpoint"),
+		)
+
+	# Protect the complete commercial image at the last event before ERPNext
+	# posts accounting entries and updates the source PR/PO billing state.
+	validate_processor_first_draft_purchase_invoice(doc)
+	pr, _scr, _plr = context
+	set_downstream_posting_datetime(doc, pr)
