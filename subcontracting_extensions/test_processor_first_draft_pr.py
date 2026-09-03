@@ -91,8 +91,12 @@ class TestProcessorFirstDraftPR(unittest.TestCase):
                 self.pr
             )
 
-    def test_purchase_receipt_submission_remains_blocked(self):
+    def test_purchase_receipt_submission_requires_j8_opt_in(self):
         with patch.object(
+            purchase_receipt.frappe,
+            "conf",
+            frappe._dict(v2_processor_first_pr_submit=0),
+        ), patch.object(
             purchase_receipt.frappe,
             "get_doc",
             side_effect=self.get_doc,

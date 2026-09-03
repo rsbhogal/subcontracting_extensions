@@ -106,8 +106,13 @@ def make_purchase_invoice(
 			as_dict=True,
 		)
 		if plr and plr.receipt_structure_version == "V2 Itemized" and plr.processor_first_draft_only:
+			checkpoint = (
+				"J8 Purchase Receipt submission checkpoint"
+				if frappe.conf.get("v2_processor_first_pr_submit")
+				else "J7 Draft Purchase Receipt checkpoint"
+			)
 			frappe.throw(
-				_("Purchase Invoice creation is not enabled at the J7 Draft PR checkpoint."),
+				_("Purchase Invoice creation is not enabled at the {0}.").format(checkpoint),
 				title=_("V2 Purchase Invoice Checkpoint"),
 			)
 	purchase_invoice = erpnext_make_purchase_invoice(

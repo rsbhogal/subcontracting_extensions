@@ -4,6 +4,10 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
+from subcontracting_extensions.overrides.posting_date_flow import (
+	set_downstream_posting_datetime,
+)
+
 
 PRECISION = 6
 
@@ -92,8 +96,17 @@ def validate_processor_first_draft_purchase_receipt(doc, method=None):
 
 
 def prevent_processor_first_purchase_receipt_submit(doc, method=None):
-	if _checkpoint_context(doc):
+	context = _checkpoint_context(doc)
+	if not context:
+		return
+	if not cint(frappe.conf.get("v2_processor_first_pr_submit")):
 		frappe.throw(
 			_("Purchase Receipt submission is not enabled at the J7 Draft PR checkpoint."),
 			title=_("Draft Purchase Receipt Checkpoint"),
 		)
+
+	# Revalidate the complete image at the last event before ERPNext submits it.
+	# This protects against a Draft row being changed after it was first mapped.
+	validate_processor_first_draft_purchase_receipt(doc)
+	scr, _plr = context
+	set_downstream_posting_datetime(doc, scr)
