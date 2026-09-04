@@ -175,10 +175,16 @@ class TestProcessorFirstDraftPI(unittest.TestCase):
 			)
 
 	def test_purchase_invoice_submission_remains_blocked(self):
-		with patch.object(
-			purchase_invoice.frappe, "get_doc", side_effect=self.get_doc,
+		with patch.dict(
+			purchase_invoice.frappe.conf,
+			{"v2_processor_first_pi_submit": 0},
+		), patch.object(
+			purchase_invoice.frappe,
+			"get_doc",
+			side_effect=self.get_doc,
 		), self.assertRaisesRegex(
-			frappe.ValidationError, "submission is not enabled"
+			frappe.ValidationError,
+			"submission is not enabled",
 		):
 			purchase_invoice.prevent_processor_first_purchase_invoice_submit(
 				self.pi
