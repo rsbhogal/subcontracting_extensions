@@ -118,6 +118,20 @@ async function render_multi_item_receipt_checkpoint(frm) {
         return true;
     }
     if (!report?.enabled || !report.is_multi_item) return false;
+    let completion;
+    try {
+        const response = await frappe.call({method: "subcontracting_extensions.receipt_completion.get_completion_position",
+            args: {processor_lot: name}});
+        if (frm.doc.name !== name || frm.__j4_request !== ticket) return true;
+        completion = response.message;
+    } catch (error) {
+        if (frm.doc.name === name && frm.__j4_request === ticket) {
+            for (const field of ["physical_receipt_position_html", "receipt_journey_html", "health_panel_html"]) {
+                frm.get_field(field)?.$wrapper.html(`<p class="text-danger">${__("Completion evidence could not be verified. Check document permissions and evidence before retrying.")}</p>`);
+            }
+        }
+        return true;
+    }
     frm.__j4_hidden_fields = {};
     for (const field of hidden_fields) {
         const df = frm.get_field(field)?.df;
@@ -130,7 +144,12 @@ async function render_multi_item_receipt_checkpoint(frm) {
         <tbody>${rows.length ? rows.map(row => `<tr>${row.map(cell => `<td>${esc(cell)}</td>`).join("")}</tr>`).join("")
             : `<tr><td colspan="${headers.length}">${esc(__("No recorded receipt items."))}</td></tr>`}</tbody></table></div>`;
     const set_panel = (field, html) => frm.get_field(field)?.$wrapper.html(html);
-    const notice = `<p class="text-warning">${esc(__("Multi-item receipt-draft checkpoint: downstream creation, material-credit application and settlement are not enabled."))}</p>`;
+    if (completion?.enabled) {
+        render_j12_completion_panels(frm, completion, table, qty, esc);
+        hide_items_grid_controls(frm);
+        return true;
+    }
+    const notice = `<p class="text-warning">${esc(__("Completion verification is not enabled. PLR allocations below include drafts and do not prove submitted receipt or invoicing. Multi-item settlement remains disabled."))}</p>`;
     set_panel("physical_receipt_position_html", notice + `<p>${esc(__("Distinct trucks for this lot"))}: <strong>${report.truck_count}</strong></p>`
         + table(["Item", "UOM", "Receipts for item", "Ordered", "PLR Accepted", "Invoice", "Invoice − Accepted", "Ordered − PLR Accepted"],
             report.items.map(item => [item.processed_item, item.stock_uom, item.receipt_count,
@@ -146,6 +165,50 @@ async function render_multi_item_receipt_checkpoint(frm) {
             row.purchase_receipt || "—", row.purchase_invoice || "—"])));
     hide_items_grid_controls(frm);
     return true;
+}
+
+
+function render_j12_completion_panels(frm, report, table, qty, esc) {
+    const set = (field, html) => frm.get_field(field)?.$wrapper.html(html);
+    const messages = {
+        UNPOSTED_RESERVATIONS: "Draft receipt reservations remain",
+        EXCESS_CAPACITY_COMMITMENT: "Receipt commitments exceed remaining capacity",
+        NATIVE_RECEIPTS_NOT_RECONCILED_TO_ALLOCATIONS: "Submitted receipts are not fully reconciled to allocation evidence",
+        JOURNEY_NOT_FULLY_VERIFIED: "Receipt or invoicing evidence is incomplete",
+        RETURNS_REQUIRE_REVIEW: "Returns require review",
+        MATERIAL_CREDIT_REQUIRES_REVIEW: "Applied material credit requires review",
+        ORDER_QUANTITY_NOT_FULLY_RECEIVED: "Net received quantity differs from the order",
+        SCR_NOT_SUBMITTED_OR_HEADER_MISMATCH: "SCR missing, not submitted, or header mismatch",
+        SCR_ROW_LINEAGE_MISMATCH: "SCR row links or quantity do not match",
+        PO_ROW_LINEAGE_MISMATCH: "PO row links do not match",
+        PR_NOT_SUBMITTED_OR_HEADER_MISMATCH: "PR missing, not submitted, or header mismatch",
+        PR_ROW_LINEAGE_MISMATCH: "PR row links or quantity do not match",
+        PI_NOT_SUBMITTED_OR_HEADER_MISMATCH: "PI missing, not submitted, or header mismatch",
+        PI_ROW_LINEAGE_MISMATCH: "PI row links, quantity or stock setting do not match",
+    };
+    const issues = codes => (codes || []).map(code => __(messages[code] || code)).join("; ") || __("None");
+    const verified = value => value === true ? __("Verified") : __("Not verified");
+    const status = report.journey_complete === true
+        ? __("Receipt and invoicing journey complete—not settlement approval.")
+        : __("Receipt and invoicing evidence requires review—not settlement approval.");
+    const notice = `<p class="text-info">${esc(status)}</p><p class="text-muted">${esc(__("Multi-item settlement remains disabled. Figures are separate for each item and UOM."))}</p>`;
+    set("physical_receipt_position_html", notice
+        + `<p>${esc(__("Distinct trucks for this lot"))}: <strong>${esc(report.truck_count)}</strong></p>`
+        + table(["Item", "UOM", "Ordered", "Net SCR Received", "Draft Reserved", "Applied Credit", "Available for Receipt"],
+            report.items.map(item => [item.processed_item, item.stock_uom, qty(item.ordered_qty),
+                qty(item.native_received_qty), qty(item.reserved_accepted_qty), qty(item.credit_applied_qty), qty(item.available_qty)]))
+        + `<p class="text-muted">${esc(__("Availability includes Draft reservations. A negative value remains visible for review; it is not extra submitted stock."))}</p>`);
+    set("health_panel_html", table(["Item", "UOM", "Verified SCR", "Verified PR", "Verified PI", "PI − SCR", "Journey", "Evidence warnings"],
+        report.items.map(item => [item.processed_item, item.stock_uom, qty(item.submitted_scr_qty),
+            qty(item.submitted_pr_qty), qty(item.submitted_pi_qty), qty(item.submitted_invoice_vs_accepted_qty),
+            item.journey_complete === true ? __("Complete") : __("Review required"), issues(item.issues)]))
+        + `<p class="text-muted">${esc(__("Verified quantities cover linked allocation evidence only. Any invoice-versus-accepted variance still requires separate settlement review."))}</p>`);
+    set("receipt_journey_html", table(["Receipt", "Item", "UOM", "Allocated Accepted", "Allocated Invoice", "SCR / Evidence", "PR / Evidence", "PI / Evidence", "Warnings"],
+        report.journeys.map(row => [row.processor_lot_receipt, row.processed_item, row.stock_uom,
+            qty(row.allocated_accepted_qty), qty(row.allocated_invoice_qty),
+            `${row.subcontracting_receipt || "—"} / ${verified(row.scr_verified)}`,
+            `${row.purchase_receipt || "—"} / ${verified(row.pr_verified)}`,
+            `${row.purchase_invoice || "—"} / ${verified(row.pi_verified)}`, issues(row.issues)])));
 }
 
 

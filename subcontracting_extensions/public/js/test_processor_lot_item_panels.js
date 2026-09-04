@@ -9,7 +9,7 @@ const context = {
     frappe: {
         ui: {form: {on() {}}},
         utils: {escape_html: value => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")},
-        call: async () => ({message: result}),
+        call: async request => ({message: request.method.includes("receipt_completion") ? {enabled: false} : result}),
     },
 };
 vm.createContext(context);
