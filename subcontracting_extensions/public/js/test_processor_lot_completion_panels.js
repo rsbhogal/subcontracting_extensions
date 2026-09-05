@@ -25,7 +25,7 @@ const data = () => ({enabled: true, is_multi_item: true, journey_complete: true,
         submitted_scr_qty: 500, submitted_pr_qty: 500, submitted_pi_qty: 500,
         journey_complete: true, issues: []},
     {processed_item: "B", stock_uom: "Units", ordered_qty: 100,
-        native_received_qty: 100, submitted_scr_qty: 100, submitted_pr_qty: 100,
+        native_received_qty: 100, available_qty: 0, reserved_accepted_qty: 0, submitted_scr_qty: 100, submitted_pr_qty: 100,
         submitted_pi_qty: 100, journey_complete: true, issues: []}],
     journeys: [{processor_lot_receipt: "PLR", processed_item: "A", stock_uom: "Kg",
         allocated_accepted_qty: 500, allocated_invoice_qty: 500, subcontracting_receipt: "SCR",
@@ -37,13 +37,18 @@ const data = () => ({enabled: true, is_multi_item: true, journey_complete: true,
         ? report : {enabled: true, is_multi_item: true}});
     await context.render_multi_item_receipt_checkpoint(frm);
     const html = field => frm.get_field(field).$wrapper.markup;
-    assert(html("physical_receipt_position_html").includes("complete—not settlement approval"));
+    assert(html("health_panel_html").includes("complete—not settlement approval"));
+    assert(html("physical_receipt_position_html").includes("Ordered quantities received in ERP"));
     assert(html("physical_receipt_position_html").includes("A &lt;unsafe&gt;"));
     assert(!html("physical_receipt_position_html").includes("A <unsafe>"));
     assert(html("health_panel_html").includes("500.000"));
     assert(html("health_panel_html").includes("100.000"));
     assert(!html("health_panel_html").includes("600.000"));
-    assert(html("receipt_journey_html").includes("PI / Verified"));
+    assert(html("receipt_journey_html").replace(/<[^>]*>/g, "").includes("PI / Verified"));
+    assert(html("receipt_journey_html").includes('/app/purchase-invoice/PI'));
+    assert(html("receipt_journey_html").includes('/app/processor-lot-receipt/PLR'));
+    assert(html("health_panel_html").includes('data-status-tone="green"'));
+    assert(html("health_panel_html").includes('Receipt Journey Complete'));
     report.journey_complete = false;
     report.items[0].journey_complete = false;
     report.items[0].available_qty = -201;
@@ -54,7 +59,7 @@ const data = () => ({enabled: true, is_multi_item: true, journey_complete: true,
     assert(html("physical_receipt_position_html").includes("-201.000"));
     assert(html("health_panel_html").includes("Receipt commitments exceed remaining capacity"));
     assert(html("health_panel_html").includes("&lt;unknown&gt;"));
-    assert(html("receipt_journey_html").includes("PI / Not verified"));
+    assert(html("receipt_journey_html").replace(/<[^>]*>/g, "").includes("PI / Not verified"));
     context.frappe.call = async request => {
         if (request.method.includes("receipt_completion")) throw Error("Permission denied");
         return {message: {enabled: true, is_multi_item: true}};
@@ -68,6 +73,11 @@ const data = () => ({enabled: true, is_multi_item: true, journey_complete: true,
     context.frappe.call = async () => {calls++; return {message: {enabled: true, is_multi_item: false}};};
     assert.strictEqual(await context.render_multi_item_receipt_checkpoint(frm), false);
     assert.strictEqual(calls, 1);
+    context.frappe.call = async request => ({message: request.method.includes("receipt_completion")
+        ? report : {enabled: true, is_multi_item: false, use_item_panels: true}});
+    assert.strictEqual(await context.render_multi_item_receipt_checkpoint(frm), true);
+    assert(html("health_panel_html").includes("Receipt commitments exceed remaining capacity"));
+    assert(!html("physical_receipt_position_html").includes("Awaiting Receipt"));
     let release;
     context.frappe.call = async request => request.method.includes("receipt_completion")
         ? new Promise(resolve => {release = resolve;}) : {message: {enabled: true, is_multi_item: true}};

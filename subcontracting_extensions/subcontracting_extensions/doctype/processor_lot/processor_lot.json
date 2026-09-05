@@ -47,6 +47,8 @@
   "physical_receipt_position_html",
   "health_panel_section",
   "health_panel_html",
+  "material_reconciliation_section",
+  "material_reconciliation_html",
   "items_section",
   "items",
   "commercial_details_section",
@@ -61,6 +63,16 @@
   "amended_from"
  ],
  "fields": [
+  {
+   "fieldname": "material_reconciliation_section",
+   "fieldtype": "Section Break",
+   "label": "Material Reconciliation",
+   "hidden": 1
+  },
+  {
+   "fieldname": "material_reconciliation_html",
+   "fieldtype": "HTML"
+  },
   {
    "fieldname": "settlement_details_section",
    "fieldtype": "Section Break",

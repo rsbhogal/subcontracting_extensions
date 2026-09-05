@@ -156,8 +156,9 @@ def get_item_position(processor_lot):
     lot.check_permission("read")
     sco = frappe.get_doc("Subcontracting Order", lot.subcontracting_order)
     sco.check_permission("read")
-    # Do not change legacy lot rendering or run the new evidence path for it.
-    if len(sco.items) <= 1:
+    # J14 opt-in uses evidence panels for single-item lots too.
+    use_item_panels = bool(cint(frappe.conf.get("v2_processor_first_material_facts")))
+    if len(sco.items) <= 1 and not use_item_panels:
         return {"enabled": True, "is_multi_item": False}
     report = position_for_lot(lot, sco)
     # Aggregate lot balances include all reservations. Document references in
@@ -180,5 +181,6 @@ def get_item_position(processor_lot):
                 row[field] = _("Restricted")
                 if field == "processor_lot_receipt":
                     row["receipt_item_key"] = None
-    report.update(enabled=True, processor_lot=lot.name, subcontracting_order=sco.name)
+    report.update(enabled=True, processor_lot=lot.name, subcontracting_order=sco.name,
+                  use_item_panels=use_item_panels)
     return report

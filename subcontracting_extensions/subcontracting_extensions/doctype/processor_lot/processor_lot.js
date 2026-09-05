@@ -29,6 +29,7 @@ frappe.ui.form.on("Processor Lot", {
     },
 
     async refresh(frm) {
+        void render_j14_material_panel(frm);
         if (await render_multi_item_receipt_checkpoint(frm)) return;
         set_field_properties(frm);
         apply_settlement_policy_override_properties(frm);
@@ -57,6 +58,7 @@ frappe.ui.form.on("Processor Lot", {
     },
 
     subcontracting_order(frm) {
+        void render_j14_material_panel(frm);
         if (!frm.doc.subcontracting_order) {
             clear_sco_details(frm);
             render_receipt_journey(frm);
@@ -117,7 +119,7 @@ async function render_multi_item_receipt_checkpoint(frm) {
         }
         return true;
     }
-    if (!report?.enabled || !report.is_multi_item) return false;
+    if (!report?.enabled || (!report.is_multi_item && !report.use_item_panels)) return false;
     let completion;
     try {
         const response = await frappe.call({method: "subcontracting_extensions.receipt_completion.get_completion_position",
@@ -186,29 +188,165 @@ function render_j12_completion_panels(frm, report, table, qty, esc) {
         PI_NOT_SUBMITTED_OR_HEADER_MISMATCH: "PI missing, not submitted, or header mismatch",
         PI_ROW_LINEAGE_MISMATCH: "PI row links, quantity or stock setting do not match",
     };
+    const text = value => esc(value);
     const issues = codes => (codes || []).map(code => __(messages[code] || code)).join("; ") || __("None");
-    const verified = value => value === true ? __("Verified") : __("Not verified");
+    const issue_tone = codes => (codes || []).some(code => code.includes("MISMATCH")
+        || code === "EXCESS_CAPACITY_COMMITMENT") ? "red" : "amber";
+    const warning = codes => j14_badge(issues(codes), codes?.length ? issue_tone(codes) : "green");
+    const evidence = (doctype, name, verified) => j14_link(doctype, name)
+        + " / " + j14_badge(verified === true ? __("Verified") : __("Not verified"), verified === true ? "green" : "amber");
     const status = report.journey_complete === true
         ? __("Receipt and invoicing journey complete—not settlement approval.")
         : __("Receipt and invoicing evidence requires review—not settlement approval.");
-    const notice = `<p class="text-info">${esc(status)}</p><p class="text-muted">${esc(__("Multi-item settlement remains disabled. Figures are separate for each item and UOM."))}</p>`;
-    set("physical_receipt_position_html", notice
+    const notice = `<p>${j14_badge(status, report.journey_complete === true ? "green" : issue_tone(report.items.flatMap(item => item.issues || [])))}</p>
+        <p class="text-muted">${esc(__("Multi-item settlement remains disabled. Figures are separate for each item and UOM."))}</p>`;
+    // Physical availability has its own status; invoicing cannot make it green.
+    const physical_ok = report.items.length > 0 && report.items.every(item =>
+        Number(item.native_received_qty) === Number(item.ordered_qty)
+        && Number(item.reserved_accepted_qty || 0) === 0 && Number(item.credit_applied_qty || 0) === 0
+        && Number(item.available_qty) === 0);
+    set("physical_receipt_position_html", `<p>${j14_badge(physical_ok ? __("Ordered quantities received in ERP")
+        : __("Receipt position requires attention"), physical_ok ? "green" : "amber")}</p>`
         + `<p>${esc(__("Distinct trucks for this lot"))}: <strong>${esc(report.truck_count)}</strong></p>`
-        + table(["Item", "UOM", "Ordered", "Net SCR Received", "Draft Reserved", "Applied Credit", "Available for Receipt"],
-            report.items.map(item => [item.processed_item, item.stock_uom, qty(item.ordered_qty),
-                qty(item.native_received_qty), qty(item.reserved_accepted_qty), qty(item.credit_applied_qty), qty(item.available_qty)]))
+        + j14_table(["Item", "UOM", "Ordered", "Net SCR Received", "Draft Reserved", "Applied Credit", "Available for Receipt"],
+            report.items.map(item => [text(item.processed_item), text(item.stock_uom), text(j14_qty(item.ordered_qty)),
+                text(j14_qty(item.native_received_qty)), text(j14_qty(item.reserved_accepted_qty)), text(j14_qty(item.credit_applied_qty)),
+                j14_badge(j14_qty(item.available_qty), Number(item.available_qty) < 0 ? "red" : Number(item.available_qty) > 0 ? "amber" : "neutral")]))
         + `<p class="text-muted">${esc(__("Availability includes Draft reservations. A negative value remains visible for review; it is not extra submitted stock."))}</p>`);
-    set("health_panel_html", table(["Item", "UOM", "Verified SCR", "Verified PR", "Verified PI", "PI − SCR", "Journey", "Evidence warnings"],
-        report.items.map(item => [item.processed_item, item.stock_uom, qty(item.submitted_scr_qty),
-            qty(item.submitted_pr_qty), qty(item.submitted_pi_qty), qty(item.submitted_invoice_vs_accepted_qty),
-            item.journey_complete === true ? __("Complete") : __("Review required"), issues(item.issues)]))
+    set("health_panel_html", notice + j14_table(["Item", "UOM", "Verified SCR", "Verified PR", "Verified PI", "PI − SCR", "Journey", "Evidence warnings"],
+        report.items.map(item => [text(item.processed_item), text(item.stock_uom), text(j14_qty(item.submitted_scr_qty)),
+            text(j14_qty(item.submitted_pr_qty)), text(j14_qty(item.submitted_pi_qty)), text(j14_qty(item.submitted_invoice_vs_accepted_qty)),
+            j14_badge(item.journey_complete === true ? __("Receipt Journey Complete") : __("Review required"),
+                item.journey_complete === true ? "green" : issue_tone(item.issues)), warning(item.issues)]))
         + `<p class="text-muted">${esc(__("Verified quantities cover linked allocation evidence only. Any invoice-versus-accepted variance still requires separate settlement review."))}</p>`);
-    set("receipt_journey_html", table(["Receipt", "Item", "UOM", "Allocated Accepted", "Allocated Invoice", "SCR / Evidence", "PR / Evidence", "PI / Evidence", "Warnings"],
-        report.journeys.map(row => [row.processor_lot_receipt, row.processed_item, row.stock_uom,
-            qty(row.allocated_accepted_qty), qty(row.allocated_invoice_qty),
-            `${row.subcontracting_receipt || "—"} / ${verified(row.scr_verified)}`,
-            `${row.purchase_receipt || "—"} / ${verified(row.pr_verified)}`,
-            `${row.purchase_invoice || "—"} / ${verified(row.pi_verified)}`, issues(row.issues)])));
+    set("receipt_journey_html", j14_table(["Receipt", "Item", "UOM", "Allocated Accepted", "Allocated Invoice", "SCR / Evidence", "PR / Evidence", "PI / Evidence", "Warnings"],
+        report.journeys.map(row => [j14_link("Processor Lot Receipt", row.processor_lot_receipt), text(row.processed_item), text(row.stock_uom),
+            text(j14_qty(row.allocated_accepted_qty)), text(j14_qty(row.allocated_invoice_qty)),
+            evidence("Subcontracting Receipt", row.subcontracting_receipt, row.scr_verified),
+            evidence("Purchase Receipt", row.purchase_receipt, row.pr_verified),
+            evidence("Purchase Invoice", row.purchase_invoice, row.pi_verified), warning(row.issues)])));
+}
+
+
+function j14_escape(value) {
+    return frappe.utils.escape_html(String(value ?? ""));
+}
+
+function j14_qty(value) {
+    const number = Number(value ?? 0);
+    if (!Number.isFinite(number)) return "—";
+    // Preserve the J13 engine's six-decimal residuals instead of displaying a
+    // nonzero balance as 0.000. Keep at least three decimals for regular values.
+    return number.toFixed(6).replace(/(\.\d{3}.*?)0+$/, "$1");
+}
+
+function j14_badge(label, tone) {
+    const palette = {green: ["#e8f5ec", "#205b35"], amber: ["#fff3d6", "#795000"],
+        red: ["#fdeaea", "#9f2525"], neutral: ["#edf3f8", "#31556f"]};
+    const [background, color] = palette[tone] || palette.neutral;
+    return `<span data-status-tone="${palette[tone] ? tone : "neutral"}" style="display:inline-block;border-radius:5px;
+        padding:3px 7px;background:${background};color:${color};font-weight:600;white-space:normal">${j14_escape(label)}</span>`;
+}
+
+function j14_link(doctype, name) {
+    if (!name) return j14_escape(__("Not created"));
+    const routes = {"Processor Lot Receipt": "processor-lot-receipt", "Subcontracting Receipt": "subcontracting-receipt",
+        "Purchase Receipt": "purchase-receipt", "Purchase Invoice": "purchase-invoice", "Stock Entry": "stock-entry",
+        "Subcontracting Order": "subcontracting-order", "Processor Lot": "processor-lot",
+        "Processor Material Account Entry": "processor-material-account-entry"};
+    if (!routes[doctype]) return j14_escape(name);
+    return `<a href="/app/${routes[doctype]}/${encodeURIComponent(name)}" target="_blank" rel="noopener noreferrer"
+        style="text-decoration:underline;overflow-wrap:anywhere">${j14_escape(name)}</a>`;
+}
+
+// Cells are already escaped text or markup from the safe helpers above.
+function j14_table(headers, rows) {
+    return `<div class="table-responsive"><table class="table table-bordered table-sm" style="margin:12px 0;line-height:1.5">
+        <thead style="background:#f5f7fa"><tr>${headers.map(h => `<th style="padding:8px;white-space:normal">${j14_escape(__(h))}</th>`).join("")}</tr></thead>
+        <tbody>${rows.length ? rows.map(row => `<tr>${row.map(cell => `<td style="padding:8px;vertical-align:top;white-space:normal;overflow-wrap:anywhere">${cell}</td>`).join("")}</tr>`).join("")
+            : `<tr><td colspan="${headers.length}">${j14_escape(__("No evidence rows."))}</td></tr>`}</tbody></table></div>`;
+}
+
+async function render_j14_material_panel(frm) {
+    const wrapper = frm.get_field("material_reconciliation_html")?.$wrapper;
+    if (!wrapper) return;
+    const ticket = frm.__j14_material_request = (frm.__j14_material_request || 0) + 1;
+    const name = frm.doc.name, sco = frm.doc.subcontracting_order;
+    wrapper.html("");
+    frm.set_df_property("material_reconciliation_section", "hidden", 1);
+    if (frm.is_new() || !sco) return;
+    const current = () => frm.doc.name === name && frm.doc.subcontracting_order === sco
+        && frm.__j14_material_request === ticket;
+    try {
+        const response = await frappe.call({method: "subcontracting_extensions.material_reconciliation_ui.get_material_panel",
+            args: {processor_lot: name}});
+        if (!current() || !response.message?.enabled) return;
+        const report = response.message;
+        if (report.processor_lot !== name || report.subcontracting_order !== sco) throw Error("Evidence identity mismatch");
+        wrapper.html(build_j14_material_panel(report));
+        frm.set_df_property("material_reconciliation_section", "hidden", 0);
+    } catch (error) {
+        if (!current()) return;
+        wrapper.html(`<p>${j14_badge(__("Material evidence unavailable"), "red")}</p>
+            <p>${j14_escape(__("Check read permissions and source evidence, then reload. No material status has been verified."))}</p>`);
+        frm.set_df_property("material_reconciliation_section", "hidden", 0);
+    }
+}
+
+function build_j14_material_panel(report) {
+    const text = j14_escape;
+    const messages = {
+        MATERIAL_BALANCE_REMAINS: "Material remains outstanding",
+        SUPPLY_EVIDENCE_MISMATCH: "Sent quantity differs from submitted transfer evidence",
+        RETURN_EVIDENCE_MISMATCH: "Returned quantity differs from submitted return evidence",
+        CONSUMPTION_EVIDENCE_MISMATCH: "Consumed quantity differs from exact receipt-row evidence",
+        NEGATIVE_MATERIAL_BALANCE: "Negative material balance",
+        ADJUSTMENT_ATTRIBUTION_REQUIRES_REVIEW: "Credit or settlement evidence requires review",
+        SCR_RETURN_REQUIRES_REVIEW: "SCR return requires review",
+        NEGATIVE_CONSUMPTION_REQUIRES_REVIEW: "Negative consumption requires review",
+        NATIVE_NET_SUPPLY_MISMATCH: "Native net supply does not match sent minus returned",
+        MOVEMENT_RETURN_FLAG_MISMATCH: "Return flag and warehouse direction disagree",
+        INVALID_EXPLICIT_COMPONENT_LINK: "Invalid component link",
+        EXPLICIT_COMPONENT_ITEM_UOM_MISMATCH: "Component link has a different item or UOM",
+        AMBIGUOUS_TRANSFER_ATTRIBUTION: "Transfer cannot be assigned to one component",
+        MOVEMENT_HEADER_MISMATCH: "Movement header does not match this SCO",
+        CONSUMPTION_LINEAGE_MISMATCH: "Consumption row links do not match this SCO",
+        SCR_HEADER_MISMATCH: "Receipt header does not match this SCO",
+        UNMATCHED_MOVEMENT: "Movement has no matching component",
+        UNMATCHED_CONSUMPTION: "Consumption has no matching component",
+        UNSUPPORTED_MOVEMENT_DIRECTION: "Movement warehouse direction requires review",
+        NONPOSITIVE_MOVEMENT_QUANTITY: "Movement quantity must be positive",
+        NO_COMPONENTS: "No component evidence",
+    };
+    const pending = new Set(["MATERIAL_BALANCE_REMAINS", "ADJUSTMENT_ATTRIBUTION_REQUIRES_REVIEW",
+        "SCR_RETURN_REQUIRES_REVIEW", "NEGATIVE_CONSUMPTION_REQUIRES_REVIEW", "AMBIGUOUS_TRANSFER_ATTRIBUTION"]);
+    const tone = codes => codes.some(code => !pending.has(code)) ? "red" : "amber";
+    const codes = report.issues || [];
+    const summary = report.material_balanced === true ? __("Material quantities reconciled")
+        : report.evidence_consistent === true ? __("Material remains outstanding") : __("Material evidence requires review");
+    const status = row => j14_badge(row.material_balanced === true ? __("Reconciled")
+        : row.evidence_consistent === true ? __("Balance remains") : __("Review required"),
+        row.material_balanced === true ? "green" : tone(row.issues || []));
+    let html = `<p>${j14_badge(summary, report.material_balanced === true ? "green" : tone(codes))}</p>
+        <p>${j14_badge(__("Settlement not enabled in this panel"), "neutral")}</p>
+        <p class="text-muted">${text(__("Evidence covers the entire SCO. Material balance is not receipt journey completion, lot closure, or settlement approval."))}</p>`;
+    if (codes.length) html += `<p>${text(codes.map(code => __(messages[code] || code)).join("; "))}</p>`;
+    html += j14_table(["Component", "UOM", "Sent", "Consumed", "Returned", "Remaining", "Evidence Status"],
+        (report.components || []).map(row => [text(row.component_item), text(row.stock_uom), text(j14_qty(row.supplied_qty)),
+            text(j14_qty(row.consumed_qty)), text(j14_qty(row.returned_qty)), text(j14_qty(row.remaining_qty)), status(row)]));
+    html += `<details style="margin-top:14px"><summary style="cursor:pointer;display:list-item;
+        width:fit-content;border:1px solid #8baecb;border-radius:6px;padding:9px 14px;
+        background:#eaf3fb;color:#174c75;font-weight:600;box-shadow:0 1px 2px #00000012">
+        ${text(__("View source documents and row evidence"))}</summary>`;
+    html += j14_table(["Document type", "Document", "Status"], (report.sources || []).map(row => [text(__(row.doctype)),
+        j14_link(row.doctype, row.name), text(__(({0: "Draft", 1: "Submitted", 2: "Cancelled"})[row.docstatus] || "Unknown"))]));
+    html += j14_table(["Stock Entry", "Component", "UOM", "Stock Quantity", "From", "To", "SCO Component Row"],
+        (report.movements || []).map(row => [j14_link("Stock Entry", row.parent), text(row.item_code), text(row.stock_uom),
+            text(j14_qty(row.stock_qty)), text(row.s_warehouse), text(row.t_warehouse), text(row.sco_rm_detail || __("Legacy matching"))]));
+    html += j14_table(["SCR", "Component", "UOM", "Consumed", "SCR Item Row"], (report.consumptions || []).map(row => [
+        j14_link("Subcontracting Receipt", row.parent), text(row.rm_item_code), text(row.stock_uom),
+        text(j14_qty(row.consumed_qty)), text(row.reference_name)]));
+    return html + "</details>";
 }
 
 
