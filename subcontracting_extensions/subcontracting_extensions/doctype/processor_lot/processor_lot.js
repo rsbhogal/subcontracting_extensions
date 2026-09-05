@@ -316,36 +316,64 @@ function build_j14_material_panel(report) {
         UNMATCHED_CONSUMPTION: "Consumption has no matching component",
         UNSUPPORTED_MOVEMENT_DIRECTION: "Movement warehouse direction requires review",
         NONPOSITIVE_MOVEMENT_QUANTITY: "Movement quantity must be positive",
+        INVALID_ADJUSTMENT_COMPONENT_LINK: "Applied credit has an invalid component link",
+        ADJUSTMENT_COMPONENT_ITEM_UOM_MISMATCH: "Applied credit component or UOM disagrees with its exact link",
+        ADJUSTMENT_HEADER_MISMATCH: "Applied credit does not belong to this SCO",
+        DRAFT_ADJUSTMENT_REQUIRES_REVIEW: "Draft material-account evidence requires review",
+        AMBIGUOUS_ADJUSTMENT_ATTRIBUTION: "Applied credit cannot be assigned to one component",
+        UNMATCHED_ADJUSTMENT: "Applied credit has no matching component",
+        NONPOSITIVE_ADJUSTMENT_QUANTITY: "Applied credit quantity must be positive",
+        APPLIED_CREDIT_EXCEEDS_PHYSICAL_REMAINING: "Applied credit exceeds physical remaining quantity",
         NO_COMPONENTS: "No component evidence",
     };
     const pending = new Set(["MATERIAL_BALANCE_REMAINS", "ADJUSTMENT_ATTRIBUTION_REQUIRES_REVIEW",
-        "SCR_RETURN_REQUIRES_REVIEW", "NEGATIVE_CONSUMPTION_REQUIRES_REVIEW", "AMBIGUOUS_TRANSFER_ATTRIBUTION"]);
+        "SCR_RETURN_REQUIRES_REVIEW", "NEGATIVE_CONSUMPTION_REQUIRES_REVIEW", "AMBIGUOUS_TRANSFER_ATTRIBUTION",
+        "DRAFT_ADJUSTMENT_REQUIRES_REVIEW", "AMBIGUOUS_ADJUSTMENT_ATTRIBUTION"]);
     const tone = codes => codes.some(code => !pending.has(code)) ? "red" : "amber";
     const codes = report.issues || [];
-    const summary = report.material_balanced === true ? __("Material quantities reconciled")
-        : report.evidence_consistent === true ? __("Material remains outstanding") : __("Material evidence requires review");
-    const status = row => j14_badge(row.material_balanced === true ? __("Reconciled")
-        : row.evidence_consistent === true ? __("Balance remains") : __("Review required"),
-        row.material_balanced === true ? "green" : tone(row.issues || []));
-    let html = `<p>${j14_badge(summary, report.material_balanced === true ? "green" : tone(codes))}</p>
+    const summary = report.evidence_consistent !== true ? __("Material evidence requires review")
+        : report.material_balanced === true ? __("Physically reconciled")
+        : report.material_accounted === true ? __("Physical balance covered by submitted credit")
+        : __("Material remains unaccounted");
+    const summary_tone = report.evidence_consistent === true
+        && (report.material_balanced === true || report.material_accounted === true) ? "green" : tone(codes);
+    const status = row => j14_badge(row.evidence_consistent !== true ? __("Review required")
+        : row.material_balanced === true ? __("Physically reconciled")
+        : row.material_accounted === true ? __("Accounted by credit") : __("Unaccounted balance remains"),
+        row.evidence_consistent === true && (row.material_balanced === true || row.material_accounted === true)
+            ? "green" : tone(row.issues || []));
+    let html = `<p>${j14_badge(summary, summary_tone)}</p>
         <p>${j14_badge(__("Settlement not enabled in this panel"), "neutral")}</p>
-        <p class="text-muted">${text(__("Evidence covers the entire SCO. Material balance is not receipt journey completion, lot closure, or settlement approval."))}</p>`;
+        <p class="text-muted">${text(__("Evidence covers the entire SCO. Applied credit accounts for a physical balance; it does not mean the material was consumed or returned. This is not lot closure or settlement approval."))}</p>`;
     if (codes.length) html += `<p>${text(codes.map(code => __(messages[code] || code)).join("; "))}</p>`;
-    html += j14_table(["Component", "UOM", "Sent", "Consumed", "Returned", "Remaining", "Evidence Status"],
+    html += j14_table(["Component", "UOM", "Sent", "Consumed", "Returned", "Physical Remaining", "Applied Credit", "Unaccounted Remaining", "Evidence Status"],
         (report.components || []).map(row => [text(row.component_item), text(row.stock_uom), text(j14_qty(row.supplied_qty)),
-            text(j14_qty(row.consumed_qty)), text(j14_qty(row.returned_qty)), text(j14_qty(row.remaining_qty)), status(row)]));
+            text(j14_qty(row.consumed_qty)), text(j14_qty(row.returned_qty)), text(j14_qty(row.physical_remaining_qty)),
+            text(j14_qty(row.applied_credit_qty)), j14_badge(j14_qty(row.unaccounted_remaining_qty),
+                Number(row.unaccounted_remaining_qty) < 0 ? "red" : Number(row.unaccounted_remaining_qty) > 0 ? "amber" : "neutral"), status(row)]));
     html += `<details style="margin-top:14px"><summary style="cursor:pointer;display:list-item;
         width:fit-content;border:1px solid #8baecb;border-radius:6px;padding:9px 14px;
         background:#eaf3fb;color:#174c75;font-weight:600;box-shadow:0 1px 2px #00000012">
         ${text(__("View source documents and row evidence"))}</summary>`;
     html += j14_table(["Document type", "Document", "Status"], (report.sources || []).map(row => [text(__(row.doctype)),
         j14_link(row.doctype, row.name), text(__(({0: "Draft", 1: "Submitted", 2: "Cancelled"})[row.docstatus] || "Unknown"))]));
-    html += j14_table(["Stock Entry", "Component", "UOM", "Stock Quantity", "From", "To", "SCO Component Row"],
-        (report.movements || []).map(row => [j14_link("Stock Entry", row.parent), text(row.item_code), text(row.stock_uom),
-            text(j14_qty(row.stock_qty)), text(row.s_warehouse), text(row.t_warehouse), text(row.sco_rm_detail || __("Legacy matching"))]));
+    html += j14_table(["Stock Entry", "Evidence Role", "Component", "UOM", "Stock Quantity", "From", "To", "SCO Component Row", "Material Account Entry"],
+        (report.movements || []).map(row => [j14_link("Stock Entry", row.parent),
+            text(row.evidence_role || __("Physical transfer or return")), text(row.item_code), text(row.stock_uom),
+            text(j14_qty(row.stock_qty)), text(row.s_warehouse), text(row.t_warehouse),
+            text(row.sco_rm_detail || __("Legacy matching")),
+            j14_link("Processor Material Account Entry", row.processor_material_account_entry)]));
     html += j14_table(["SCR", "Component", "UOM", "Consumed", "SCR Item Row"], (report.consumptions || []).map(row => [
         j14_link("Subcontracting Receipt", row.parent), text(row.rm_item_code), text(row.stock_uom),
         text(j14_qty(row.consumed_qty)), text(row.reference_name)]));
+    html += j14_table(["Material Account Entry", "Status", "Entry Type", "Component", "UOM", "Account Quantity", "SCO Component Row"],
+        (report.adjustments || []).map(row => [j14_link(row.doctype, row.name),
+            text(__(({0: "Draft", 1: "Submitted", 2: "Cancelled"})[row.docstatus] || "Review")),
+            text(row.entry_type || row.reason || __("Other evidence")), text(row.principal_component || "—"),
+            text(row.account_uom || "—"), text(row.account_qty == null ? "—" : j14_qty(row.account_qty)),
+            text(row.sco_supplied_item || __("Not attributed"))]));
+    html += j14_table(["Settlement Document", "Evidence Role"], (report.settlement_evidence || []).map(row => [
+        j14_link(row.doctype, row.name), text(row.reason)]));
     return html + "</details>";
 }
 

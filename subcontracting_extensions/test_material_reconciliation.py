@@ -201,6 +201,75 @@ class TestMaterialReconciliation(unittest.TestCase):
         self.assertIn("ADJUSTMENT_ATTRIBUTION_REQUIRES_REVIEW", report["issues"])
         self.assertFalse(report["material_balanced"])
 
+    def credit(self, **changes):
+        row = dict(doctype="Processor Material Account Entry", name="PMA", docstatus=1, entry_type="Credit Applied",
+            account_direction="Debit", account_qty=10, subcontracting_order="SCO",
+            sco_supplied_item="RM-A", principal_component="Wire", account_uom="Kg",
+            processor_lot="LOT", is_reversed=0)
+        row.update(changes)
+        return row
+
+    def test_applied_credit_accounts_for_but_does_not_remove_physical_remaining(self):
+        self.sco["supplied_items"][0]["consumed_qty"] = 490
+        self.consumptions[0]["consumed_qty"] = 490
+        report = self.report([self.credit()])
+        row = report["components"][0]
+        self.assertEqual(row["physical_remaining_qty"], 10)
+        self.assertEqual(row["applied_credit_qty"], 10)
+        self.assertEqual(row["unaccounted_remaining_qty"], 0)
+        self.assertFalse(row["material_balanced"])
+        self.assertTrue(row["material_accounted"])
+        self.assertTrue(report["material_accounted"])
+
+    def test_partial_credit_preserves_unaccounted_remaining(self):
+        self.sco["supplied_items"][0]["consumed_qty"] = 490
+        self.consumptions[0]["consumed_qty"] = 490
+        report = self.report([self.credit(account_qty=4)])
+        self.assertEqual(report["components"][0]["unaccounted_remaining_qty"], 6)
+        self.assertIn("MATERIAL_BALANCE_REMAINS", report["issues"])
+
+    def test_credit_above_physical_remaining_fails_closed(self):
+        report = self.report([self.credit()])
+        self.assertEqual(report["components"][0]["physical_remaining_qty"], 0)
+        self.assertEqual(report["components"][0]["unaccounted_remaining_qty"], -10)
+        self.assertIn("APPLIED_CREDIT_EXCEEDS_PHYSICAL_REMAINING", report["issues"])
+
+    def test_draft_credit_is_not_applied(self):
+        report = self.report([self.credit(docstatus=0)])
+        self.assertEqual(report["components"][0]["applied_credit_qty"], 0)
+        self.assertIn("DRAFT_ADJUSTMENT_REQUIRES_REVIEW", report["issues"])
+
+    def test_reversed_credit_is_not_applied(self):
+        report = self.report([self.credit(is_reversed=1)])
+        self.assertEqual(report["components"][0]["applied_credit_qty"], 0)
+        self.assertTrue(report["material_balanced"])
+
+    def test_invalid_explicit_adjustment_link_never_falls_back(self):
+        report = self.report([self.credit(sco_supplied_item="OTHER")])
+        self.assertEqual(report["components"][0]["applied_credit_qty"], 0)
+        self.assertIn("INVALID_ADJUSTMENT_COMPONENT_LINK", report["issues"])
+
+    def test_legacy_credit_falls_back_only_to_unique_item_and_uom(self):
+        self.sco["supplied_items"][0]["consumed_qty"] = 490
+        self.consumptions[0]["consumed_qty"] = 490
+        report = self.report([self.credit(sco_supplied_item=None)])
+        self.assertEqual(report["components"][0]["applied_credit_qty"], 10)
+
+    def test_legacy_credit_repeated_component_is_ambiguous(self):
+        self.add_component("C", "Wire", "Kg", 200)
+        for movement, component in zip(self.movements, self.sco["supplied_items"]):
+            movement["sco_rm_detail"] = component["name"]
+        report = self.report([self.credit(sco_supplied_item=None)])
+        self.assertIn("AMBIGUOUS_ADJUSTMENT_ATTRIBUTION", report["issues"])
+
+    def test_adjustment_item_uom_must_agree_with_explicit_link(self):
+        report = self.report([self.credit(principal_component="Blank", account_uom="Units")])
+        self.assertIn("ADJUSTMENT_COMPONENT_ITEM_UOM_MISMATCH", report["issues"])
+
+    def test_duplicate_adjustment_rejected(self):
+        with self.assertRaisesRegex(ValueError, "duplicate adjustment"):
+            self.report([self.credit(), self.credit()])
+
     def test_no_components_cannot_report_balanced(self):
         self.sco["supplied_items"] = []
         self.assertFalse(self.report()["material_balanced"])

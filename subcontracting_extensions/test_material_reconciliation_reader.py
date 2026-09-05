@@ -237,23 +237,101 @@ class TestMaterialReconciliationReader(unittest.TestCase):
         for status in (0, 1):
             doc["docstatus"] = status
             report = self.report()
-            self.assertIn("ADJUSTMENT_ATTRIBUTION_REQUIRES_REVIEW", report["issues"])
+            expected = ("DRAFT_ADJUSTMENT_REQUIRES_REVIEW" if status == 0
+                        else "ADJUSTMENT_ATTRIBUTION_REQUIRES_REVIEW")
+            self.assertIn(expected, report["issues"])
             self.assertFalse(report["material_balanced"])
         doc["docstatus"] = 2
         self.assertTrue(self.report()["material_balanced"])
 
+    def add_applied_credit(self, **changes):
+        docstatus = changes.pop("docstatus", 1)
+        values = dict(entry_type="Credit Applied", account_direction="Debit", account_qty=10,
+            subcontracting_order="SCO", sco_supplied_item="RM-A", principal_component="Wire",
+            account_uom="Kg", processor_lot="LOT", is_reversed=0)
+        values.update(changes)
+        doc = self.api.add("Processor Material Account Entry", "PMA", **values)
+        doc["docstatus"] = docstatus
+        return doc
+
+    def test_submitted_exact_credit_is_attributed_without_changing_physical_remaining(self):
+        self.sco["supplied_items"][0]["consumed_qty"] = 490
+        self.scr["supplied_items"][0]["consumed_qty"] = 490
+        self.add_applied_credit()
+        report = self.report()
+        row = report["components"][0]
+        self.assertEqual(row["physical_remaining_qty"], 10)
+        self.assertEqual(row["applied_credit_qty"], 10)
+        self.assertEqual(row["unaccounted_remaining_qty"], 0)
+        self.assertFalse(report["material_balanced"])
+        self.assertTrue(report["material_accounted"])
+
+    def test_draft_credit_remains_review_only(self):
+        self.add_applied_credit(docstatus=0)
+        report = self.report()
+        self.assertEqual(report["components"][0]["applied_credit_qty"], 0)
+        self.assertIn("DRAFT_ADJUSTMENT_REQUIRES_REVIEW", report["issues"])
+
+    def test_reversed_submitted_credit_is_excluded(self):
+        self.add_applied_credit(is_reversed=1)
+        report = self.report()
+        self.assertEqual(report["components"][0]["applied_credit_qty"], 0)
+        self.assertTrue(report["material_balanced"])
+
+    def test_credit_for_wrong_sco_is_discovered_by_lot_and_rejected(self):
+        self.add_applied_credit(subcontracting_order="OTHER")
+        self.assertIn("ADJUSTMENT_HEADER_MISMATCH", self.report()["issues"])
+
+    def test_credit_with_invalid_explicit_component_is_not_reassigned(self):
+        self.add_applied_credit(sco_supplied_item="OTHER")
+        self.assertIn("INVALID_ADJUSTMENT_COMPONENT_LINK", self.report()["issues"])
+
+    def test_credit_application_stock_entry_is_visible_but_not_physical_movement(self):
+        self.sco["supplied_items"][0]["consumed_qty"] = 490
+        self.scr["supplied_items"][0]["consumed_qty"] = 490
+        self.add_applied_credit(application_stock_entry="APPLICATION-SE")
+        self.api.add("Stock Entry", "APPLICATION-SE", subcontracting_order="SCO", supplier=None,
+            company="Company", purpose="Material Issue", is_return=0, items=[Doc(name="APP-ROW",
+                item_code="Wire", stock_uom="Kg", transfer_qty=10,
+                s_warehouse="Processor", t_warehouse=None)])
+        report = self.report()
+        self.assertTrue(report["material_accounted"])
+        movement = next(row for row in report["movements"] if row["parent"] == "APPLICATION-SE")
+        self.assertEqual(movement["evidence_role"], "Material credit application")
+        self.assertEqual(movement["processor_material_account_entry"], "PMA")
+        self.assertNotIn("MOVEMENT_HEADER_MISMATCH", report["issues"])
+
+    def test_unlinked_material_issue_remains_physical_evidence_mismatch(self):
+        self.api.add("Stock Entry", "ISSUE", subcontracting_order="SCO", supplier=None,
+            company="Company", purpose="Material Issue", is_return=0, items=[Doc(name="ISSUE-ROW",
+                item_code="Wire", stock_uom="Kg", transfer_qty=10,
+                s_warehouse="Processor", t_warehouse=None)])
+        self.assertIn("MOVEMENT_HEADER_MISMATCH", self.report()["issues"])
+
     def test_plr_only_credit_is_discovered(self):
         self.api.add("Processor Lot Receipt", "PLR", lot_allocations=[Doc(processor_lot="LOT")])
         self.api.add("Processor Material Account Entry", "PMA", processor_lot_receipt="PLR")
-        self.assertIn("ADJUSTMENT_ATTRIBUTION_REQUIRES_REVIEW", self.report()["issues"])
+        self.assertIn("ADJUSTMENT_HEADER_MISMATCH", self.report()["issues"])
 
     def test_debit_note_backlink_is_discovered(self):
         self.api.add("Purchase Invoice", "PI", custom_processor_lot_settlement="LOT")
-        self.assertIn("ADJUSTMENT_ATTRIBUTION_REQUIRES_REVIEW", self.report()["issues"])
+        report = self.report()
+        self.assertTrue(report["material_balanced"])
+        self.assertEqual(report["settlement_evidence"], [
+            {"doctype": "Purchase Invoice", "name": "PI", "reason": "Debit Note"}])
 
     def test_settlement_state_without_document_blocks(self):
         self.lot["settlement_status"] = "Completed"
-        self.assertFalse(self.report()["material_balanced"])
+        report = self.report()
+        self.assertTrue(report["material_balanced"])
+        self.assertEqual(report["settlement_evidence"][0]["reason"], "Settlement state")
+
+    def test_debit_note_found_by_two_paths_is_deduplicated(self):
+        self.lot["debit_note"] = "PI"
+        self.api.add("Purchase Invoice", "PI", custom_processor_lot_settlement="LOT")
+        report = self.report()
+        self.assertEqual(report["settlement_evidence"], [
+            {"doctype": "Purchase Invoice", "name": "PI", "reason": "Debit Note"}])
 
     def test_other_lot_same_sco_adjustments_are_not_ignored(self):
         self.api.add("Processor Lot", "LOT-2", subcontracting_order="SCO", **self.header)

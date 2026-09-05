@@ -128,14 +128,20 @@ def _read_material_position(api, processor_lot):
     # historical ones, rather than silently treating shared-SCO evidence as local.
     lot_names = names("Processor Lot", {"subcontracting_order": sco.name}) | {lot.name}
     adjustments = []
+    settlement_evidence = []
+
+    def add_settlement_evidence(doctype, name, reason):
+        if not any((row["doctype"], row["name"], row["reason"]) ==
+                   (doctype, name, reason) for row in settlement_evidence):
+            settlement_evidence.append(dict(doctype=doctype, name=name, reason=reason))
     for name in sorted(lot_names):
         related = read("Processor Lot", name)
         if related.get("debit_note"):
             debit = read("Purchase Invoice", related.get("debit_note"))
             if debit.docstatus != 2:
-                adjustments.append(dict(doctype="Purchase Invoice", name=debit.name))
+                add_settlement_evidence("Purchase Invoice", debit.name, "Debit Note")
         if related.get("settlement_status") not in (None, "", "Draft", "Reopened", "Cancelled"):
-            adjustments.append(dict(doctype="Processor Lot", name=name, reason="Settlement state"))
+            add_settlement_evidence("Processor Lot", name, "Settlement state")
 
     plr_names = child_parents("Processor Lot Receipt Allocation", "Processor Lot Receipt", "lot_allocations",
                               {"processor_lot": ["in", sorted(lot_names)]})
@@ -162,26 +168,49 @@ def _read_material_position(api, processor_lot):
     for name in sorted(account_names):
         doc = read("Processor Material Account Entry", name)
         if doc.docstatus != 2:
-            # Draft, reversed and reversal evidence all require explicit review;
-            # no item-code netting and no implicit disappearance of reversals.
-            adjustments.append(dict(doctype="Processor Material Account Entry", name=name))
+            adjustments.append(dict(
+                doctype="Processor Material Account Entry", name=name,
+                docstatus=doc.get("docstatus"), entry_type=doc.get("entry_type"),
+                account_direction=doc.get("account_direction"), account_qty=doc.get("account_qty"),
+                subcontracting_order=doc.get("subcontracting_order"),
+                sco_supplied_item=doc.get("sco_supplied_item"),
+                principal_component=doc.get("principal_component"), account_uom=doc.get("account_uom"),
+                processor_lot=doc.get("processor_lot"), is_reversed=doc.get("is_reversed"),
+                against_entry=doc.get("against_entry"), reversal_of=doc.get("reversal_of"),
+                application_stock_entry=doc.get("application_stock_entry"),
+            ))
     for name in sorted(names("Purchase Invoice", {"custom_processor_lot_settlement": ["in", sorted(lot_names)],
                                                    "docstatus": ["!=", 2]})):
         doc = read("Purchase Invoice", name)
         if doc.docstatus != 2:
-            adjustments.append(dict(doctype="Purchase Invoice", name=name))
+            add_settlement_evidence("Purchase Invoice", name, "Debit Note")
 
-    report = reconcile_material(normalized, movements, receipts, consumptions, adjustments)
+    application_entries = {row.get("application_stock_entry"): row["name"] for row in adjustments
+                           if row.get("doctype") == "Processor Material Account Entry"
+                           and row.get("docstatus") == 1 and row.get("entry_type") == "Credit Applied"
+                           and row.get("application_stock_entry")}
+    physical_movements = []
+    for movement in movements:
+        account_entry = application_entries.get(movement["parent"])
+        if account_entry:
+            movement["evidence_role"] = "Material credit application"
+            movement["processor_material_account_entry"] = account_entry
+        else:
+            movement["evidence_role"] = "Physical transfer or return"
+            physical_movements.append(movement)
+
+    report = reconcile_material(normalized, physical_movements, receipts, consumptions, adjustments)
     if issues:
         report["issues"] = list(dict.fromkeys(report["issues"] + issues))
-        report["evidence_consistent"] = report["material_balanced"] = False
+        report["evidence_consistent"] = report["material_balanced"] = report["material_accounted"] = False
         for row in report["components"]:
             row["issues"] = list(dict.fromkeys(row["issues"] + issues))
-            row["evidence_consistent"] = row["material_balanced"] = False
+            row["evidence_consistent"] = row["material_balanced"] = row["material_accounted"] = False
     report.update(processor_lot=lot.name, subcontracting_order=sco.name,
                   evidence_scope="Entire SCO; quantity evidence only, not lot completion or settlement approval",
                   reader_issues=issues, movements=movements, receipts=receipts,
                   consumptions=consumptions, adjustments=adjustments,
+                  settlement_evidence=settlement_evidence,
                   sources=[dict(doctype=dt, name=name, docstatus=doc.get("docstatus"))
                            for (dt, name), doc in sorted(documents.items())])
     return report

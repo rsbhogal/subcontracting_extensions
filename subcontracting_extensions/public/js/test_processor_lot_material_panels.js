@@ -19,15 +19,19 @@ function form() {
         get_field: get, set_df_property(key, field, value) {get(key).df[field] = value;}};
 }
 const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: "SCO", material_balanced: true,
+    material_accounted: true,
     evidence_consistent: true, settlement_enabled: false, issues: [],
     components: [{component_item: "Wire <unsafe>", stock_uom: "Kg", supplied_qty: 500, consumed_qty: 500,
-        returned_qty: 0, remaining_qty: 0, material_balanced: true, evidence_consistent: true, issues: []},
+        returned_qty: 0, remaining_qty: 0, physical_remaining_qty: 0, applied_credit_qty: 0,
+        unaccounted_remaining_qty: 0, material_balanced: true, material_accounted: true, evidence_consistent: true, issues: []},
         {component_item: "Blank", stock_uom: "Units", supplied_qty: 100, consumed_qty: 100,
-        returned_qty: 0, remaining_qty: 0, material_balanced: true, evidence_consistent: true, issues: []}],
+        returned_qty: 0, remaining_qty: 0, physical_remaining_qty: 0, applied_credit_qty: 0,
+        unaccounted_remaining_qty: 0, material_balanced: true, material_accounted: true, evidence_consistent: true, issues: []}],
     sources: [{doctype: "Stock Entry", name: 'STE/a?"<>', docstatus: 1}],
-    movements: [{parent: "STE", item_code: "Wire", stock_uom: "Kg", stock_qty: 500,
+    movements: [{parent: "STE", evidence_role: "Physical transfer or return", item_code: "Wire", stock_uom: "Kg", stock_qty: 500,
         s_warehouse: "Factory", t_warehouse: "Processor", sco_rm_detail: "RM"}],
-    consumptions: [{parent: "SCR", rm_item_code: "Wire", stock_uom: "Kg", consumed_qty: 500, reference_name: "SCR-ROW"}]});
+    consumptions: [{parent: "SCR", rm_item_code: "Wire", stock_uom: "Kg", consumed_qty: 500, reference_name: "SCR-ROW"}],
+    adjustments: [], settlement_evidence: []});
 (async () => {
     const frm = form();
     let report = data();
@@ -36,7 +40,7 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     const html = () => frm.get_field("material_reconciliation_html").$wrapper.markup;
     const hidden = () => frm.get_field("material_reconciliation_section").df.hidden;
     assert.strictEqual(hidden(), 0);
-    assert(html().includes("Material quantities reconciled"));
+    assert(html().includes("Physically reconciled"));
     assert(html().includes('data-status-tone="green"'));
     assert(html().includes("500.000") && html().includes("100.000") && !html().includes("600.000"));
     assert(html().includes("Wire &lt;unsafe&gt;") && !html().includes("Wire <unsafe>"));
@@ -45,12 +49,36 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     assert(html().includes("Settlement not enabled"));
     report.material_balanced = false;
     report.issues = ["MATERIAL_BALANCE_REMAINS"];
-    Object.assign(report.components[0], {material_balanced: false, remaining_qty: 0.000001, issues: report.issues});
+    report.material_accounted = false;
+    Object.assign(report.components[0], {material_balanced: false, material_accounted: false,
+        remaining_qty: 0.000001, physical_remaining_qty: 0.000001,
+        unaccounted_remaining_qty: 0.000001, issues: report.issues});
     await context.render_j14_material_panel(frm);
     assert(html().includes("0.000001"));
     assert(html().includes('data-status-tone="amber"'));
     assert.strictEqual(context.j14_qty(500), "500.000");
     assert.strictEqual(context.j14_qty(-0.000001), "-0.000001");
+    report = data();
+    report.material_balanced = false;
+    Object.assign(report.components[0], {consumed_qty: 490, remaining_qty: 10, physical_remaining_qty: 10,
+        applied_credit_qty: 10, unaccounted_remaining_qty: 0, material_balanced: false, material_accounted: true});
+    report.adjustments = [{doctype: "Processor Material Account Entry", name: 'PMA/a?"<>', docstatus: 1,
+        entry_type: "Credit Applied", principal_component: "Wire <unsafe>", account_uom: "Kg",
+        account_qty: 10, sco_supplied_item: "RM-A"}];
+    report.movements.push({parent: "APP-SE", evidence_role: "Material credit application",
+        processor_material_account_entry: 'PMA/a?"<>', item_code: "Wire", stock_uom: "Kg", stock_qty: 10,
+        s_warehouse: "Processor", t_warehouse: null, sco_rm_detail: null});
+    report.settlement_evidence = [{doctype: "Purchase Invoice", name: "DN-1", reason: "Debit Note"}];
+    await context.render_j14_material_panel(frm);
+    assert(html().includes("Physical balance covered by submitted credit"));
+    assert(html().includes("Accounted by credit"));
+    assert(html().includes("Physical Remaining") && html().includes("Applied Credit") && html().includes("Unaccounted Remaining"));
+    assert(html().includes("/app/processor-material-account-entry/PMA%2Fa%3F%22%3C%3E"));
+    assert(html().includes("Wire &lt;unsafe&gt;") && !html().includes("Wire <unsafe>"));
+    assert(html().includes("RM-A"));
+    assert(html().includes("Material credit application"));
+    assert(html().includes("/app/stock-entry/APP-SE"));
+    assert(html().includes("/app/purchase-invoice/DN-1"));
     report.evidence_consistent = false;
     report.issues = ["NEGATIVE_MATERIAL_BALANCE", "<unknown>"];
     await context.render_j14_material_panel(frm);
@@ -88,5 +116,5 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     context.frappe.call = () => {throw Error("Should not call for new document");};
     await context.render_j14_material_panel(frm);
     assert.strictEqual(hidden(), 1);
-    console.log("J14 material statuses, links, precision, escaping, permissions and stale responses: PASS");
+    console.log("J15C material balances, applied-credit links, statuses, precision, escaping, permissions and stale responses: PASS");
 })().catch(error => {console.error(error); process.exitCode = 1;});

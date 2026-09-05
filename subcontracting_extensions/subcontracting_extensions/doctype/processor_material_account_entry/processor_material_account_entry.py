@@ -10,6 +10,10 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+from subcontracting_extensions.material_adjustment_identity import (
+	resolve_sco_component,
+)
+
 
 DIRECTION_BY_ENTRY_TYPE = {
 	"Advance Credit": "Credit",
@@ -355,6 +359,7 @@ class ProcessorMaterialAccountEntry(Document):
 
 	def _set_source_identity(self) -> None:
 		"""Derive account identity from PLR, Processor Lot and SCO."""
+		finished_row_hint = None
 		if self.processor_lot_receipt:
 			plr = frappe.get_doc(
 				"Processor Lot Receipt",
@@ -370,6 +375,7 @@ class ProcessorMaterialAccountEntry(Document):
 				anchor = _get_v2_credit_anchor(plr, self.receipt_item_key)
 				self.processor_lot = anchor.processor_lot
 				self.subcontracting_order = anchor.subcontracting_order
+				finished_row_hint = anchor.subcontracting_order_item
 			else:
 				if self.receipt_item_key:
 					frappe.throw(
@@ -388,11 +394,20 @@ class ProcessorMaterialAccountEntry(Document):
 				)
 			self.subcontracting_order = lot.subcontracting_order
 
-		if self.subcontracting_order:
-			self._set_identity_from_sco()
+		if self.entry_type == "Credit Applied" and self.against_entry:
+			source = frappe.get_doc(
+				"Processor Material Account Entry", self.against_entry
+			)
+			self.processed_item = source.processed_item
+			self.processed_item_uom = source.processed_item_uom
+			self.principal_component = source.principal_component
+			self.account_uom = source.account_uom
 
-	def _set_identity_from_sco(self) -> None:
-		"""Derive the V1 single-item, single-component account identity."""
+		if self.subcontracting_order:
+			self._set_identity_from_sco(finished_row_hint)
+
+	def _set_identity_from_sco(self, finished_row_hint=None) -> None:
+		"""Derive account identity and its exact document-local SCO row."""
 		sco = frappe.get_doc(
 			"Subcontracting Order",
 			self.subcontracting_order,
@@ -408,43 +423,33 @@ class ProcessorMaterialAccountEntry(Document):
 		self.supplier = sco.supplier
 		self.supplier_warehouse = sco.supplier_warehouse
 
-		processed_items = {
-			(
-				row.item_code,
-				row.stock_uom
-				or frappe.db.get_value("Item", row.item_code, "stock_uom"),
+		try:
+			component = resolve_sco_component(
+				sco.items,
+				sco.supplied_items,
+				explicit=self.sco_supplied_item or None,
+				finished_row=finished_row_hint,
+				processed_item=self.processed_item or None,
+				processed_uom=self.processed_item_uom or None,
+				component_item=self.principal_component or None,
+				account_uom=self.account_uom or None,
 			)
-			for row in sco.items
-			if row.item_code
-		}
-		if len(processed_items) != 1:
+		except ValueError as error:
 			frappe.throw(
-				_(
-					"Processor Material Account pilot requires exactly "
-					"one processed item in Subcontracting Order {0}."
-				).format(frappe.bold(sco.name))
+				_("Cannot attribute Processor Material Account entry to one SCO component: {0}.").format(
+					str(error)
+				)
 			)
-		self.processed_item, self.processed_item_uom = next(
-			iter(processed_items)
+		finished = next(row for row in sco.items if row.name == component.reference_name)
+		self.sco_supplied_item = component.name
+		self.processed_item = finished.item_code
+		self.processed_item_uom = finished.stock_uom or frappe.db.get_value(
+			"Item", finished.item_code, "stock_uom"
 		)
-
-		components = {
-			(
-				row.rm_item_code,
-				row.stock_uom
-				or frappe.db.get_value("Item", row.rm_item_code, "stock_uom"),
-			)
-			for row in sco.supplied_items
-			if row.rm_item_code
-		}
-		if len(components) != 1:
-			frappe.throw(
-				_(
-					"Processor Material Account pilot requires exactly "
-					"one principal component in Subcontracting Order {0}."
-				).format(frappe.bold(sco.name))
-			)
-		self.principal_component, self.account_uom = next(iter(components))
+		self.principal_component = component.rm_item_code
+		self.account_uom = component.stock_uom or frappe.db.get_value(
+			"Item", component.rm_item_code, "stock_uom"
+		)
 
 	def _set_account_direction(self) -> None:
 		"""Derive direction; it is never selected by the user."""
@@ -951,6 +956,12 @@ class ProcessorMaterialAccountEntry(Document):
 
 	def _validate_system_fields(self) -> None:
 		previous_doc = self.get_doc_before_save()
+		if (
+			previous_doc
+			and (self.sco_supplied_item or "")
+			!= (previous_doc.sco_supplied_item or "")
+		):
+			frappe.throw(_("SCO Supplied Item is maintained by the system."))
 		if (
 			previous_doc
 			and (self.receipt_item_key or "")

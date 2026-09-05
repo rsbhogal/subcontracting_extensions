@@ -420,6 +420,8 @@ class TestProcessorLotReceipt(FrappeTestCase):
 					item_code="Processed Item",
 					stock_uom="Kg",
 					qty=100,
+					received_qty=0,
+					returned_qty=0,
 				)
 			],
 		)
@@ -471,6 +473,8 @@ class TestProcessorLotReceipt(FrappeTestCase):
 					item_code="Processed Item",
 					stock_uom="Kg",
 					qty=100,
+					received_qty=0,
+					returned_qty=0,
 				)
 			],
 		)
@@ -738,7 +742,9 @@ class TestProcessorLotReceipt(FrappeTestCase):
 			],
 		)
 		pma = frappe._dict(principal_component="Shared Component")
-		scr = frappe._dict(
+		# A real SCR Document exposes ``items`` as a child-table attribute.
+		# frappe._dict.items is the mapping method and is not an SCR test double.
+		scr = SimpleNamespace(
 			name="SCR-TEST-V2",
 			items=[
 				frappe._dict(name="SCR-ITEM-A"),

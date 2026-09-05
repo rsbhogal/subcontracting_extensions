@@ -32,8 +32,9 @@ def reconcile_material(sco, movements, receipts, consumptions, adjustments=()):
       subcontracting_order_item, item_code.
     consumptions: name, parent, docstatus, subcontracting_order, reference_name
       (SCR item), rm_item_code, stock_uom, consumed_qty.
-    adjustments: any existing credit/settlement evidence blocks completion;
-      attribution/netting is intentionally not implemented at J13A.
+    adjustments: normalized Processor Material Account evidence. Only submitted,
+      unreversed Credit Applied entries with exact component attribution reduce
+      unaccounted remaining; they never reduce physical remaining.
     """
     finished = {}
     for row in sco["items"]:
@@ -57,7 +58,7 @@ def reconcile_material(sco, movements, receipts, consumptions, adjustments=()):
         components[key] = dict(sco_supplied_item=key, sco_finished_item=fg,
             component_item=row["rm_item_code"], stock_uom=row["stock_uom"],
             **values, transferred_qty=Decimal(0), evidenced_returned_qty=Decimal(0),
-            evidenced_consumed_qty=Decimal(0), issues=[])
+            evidenced_consumed_qty=Decimal(0), applied_credit_qty=Decimal(0), issues=[])
     issues = []
 
     def problem(code, rows):
@@ -148,8 +149,50 @@ def reconcile_material(sco, movements, receipts, consumptions, adjustments=()):
             continue
         matches[0]["evidenced_consumed_qty"] += amount
 
-    if adjustments:
-        problem("ADJUSTMENT_ATTRIBUTION_REQUIRES_REVIEW", list(components.values()))
+    seen = set()
+    for adjustment in adjustments:
+        if adjustment.get("docstatus") == 2:
+            continue
+        if adjustment.get("doctype") != "Processor Material Account Entry":
+            problem("ADJUSTMENT_ATTRIBUTION_REQUIRES_REVIEW", list(components.values()))
+            continue
+        name = adjustment.get("name")
+        identity = (adjustment.get("doctype"), name)
+        if not name or identity in seen:
+            raise ValueError("Missing or duplicate adjustment identity")
+        seen.add(identity)
+        explicit = adjustment.get("sco_supplied_item")
+        matches = [row for row in components.values() if
+                   (row["component_item"], row["stock_uom"]) ==
+                   (adjustment.get("principal_component"), adjustment.get("account_uom"))]
+        if explicit:
+            linked = components.get(explicit)
+            if linked is None:
+                problem("INVALID_ADJUSTMENT_COMPONENT_LINK", matches)
+                continue
+            if linked not in matches:
+                problem("ADJUSTMENT_COMPONENT_ITEM_UOM_MISMATCH", matches + [linked])
+                continue
+            matches = [linked]
+        if adjustment.get("subcontracting_order") != sco["name"]:
+            problem("ADJUSTMENT_HEADER_MISMATCH", matches)
+            continue
+        if adjustment.get("docstatus") != 1:
+            problem("DRAFT_ADJUSTMENT_REQUIRES_REVIEW", matches)
+            continue
+        if adjustment.get("entry_type") != "Credit Applied" or adjustment.get("account_direction") != "Debit":
+            problem("ADJUSTMENT_ATTRIBUTION_REQUIRES_REVIEW", matches or list(components.values()))
+            continue
+        if adjustment.get("is_reversed"):
+            continue
+        if len(matches) != 1:
+            problem("AMBIGUOUS_ADJUSTMENT_ATTRIBUTION" if matches else "UNMATCHED_ADJUSTMENT", matches)
+            continue
+        amount = _qty(adjustment.get("account_qty"))
+        if amount <= 0:
+            problem("NONPOSITIVE_ADJUSTMENT_QUANTITY", matches)
+            continue
+        matches[0]["applied_credit_qty"] += amount
     for row in components.values():
         for native, evidence, code in (
             ("supplied_qty", "transferred_qty", "SUPPLY_EVIDENCE_MISMATCH"),
@@ -159,19 +202,26 @@ def reconcile_material(sco, movements, receipts, consumptions, adjustments=()):
             if row[native] != row[evidence]:
                 problem(code, [row])
         row["remaining_qty"] = row["supplied_qty"] - row["consumed_qty"] - row["returned_qty"]
+        row["physical_remaining_qty"] = row["remaining_qty"]
+        row["unaccounted_remaining_qty"] = row["physical_remaining_qty"] - row["applied_credit_qty"]
         row["evidence_remaining_qty"] = row["transferred_qty"] - row["evidenced_consumed_qty"] - row["evidenced_returned_qty"]
         if row["remaining_qty"] < 0 or row["evidence_remaining_qty"] < 0:
             problem("NEGATIVE_MATERIAL_BALANCE", [row])
+        if row["unaccounted_remaining_qty"] < 0:
+            problem("APPLIED_CREDIT_EXCEEDS_PHYSICAL_REMAINING", [row])
     consistent = not issues
     for row in components.values():
         row["evidence_consistent"] = not row["issues"]
-        if row["remaining_qty"] > 0:
+        if row["unaccounted_remaining_qty"] > 0:
             problem("MATERIAL_BALANCE_REMAINS", [row])
-        row["material_balanced"] = not row["issues"]
+        row["material_balanced"] = row["physical_remaining_qty"] == 0 and not row["issues"]
+        row["material_accounted"] = row["unaccounted_remaining_qty"] == 0 and not row["issues"]
         for key, value in row.items():
             if isinstance(value, Decimal):
                 row[key] = float(value)
     return dict(components=list(components.values()), issues=issues,
-        evidence_consistent=consistent, material_balanced=bool(components) and not issues,
+        evidence_consistent=consistent,
+        material_balanced=bool(components) and not issues and all(row["material_balanced"] for row in components.values()),
+        material_accounted=bool(components) and not issues and all(row["material_accounted"] for row in components.values()),
         settlement_enabled=False,
         scope="Quantity evidence only; remaining material is not automatically a recoverable shortage")
