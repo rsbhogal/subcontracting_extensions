@@ -22,6 +22,7 @@ function form() {
 }
 const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: "SCO", material_balanced: true,
     material_accounted: true,
+    commercial_policy_status: "DEFERRED",
     material_settlement_eligible: true, material_next_action: "REVIEW_RECEIPT_AND_INVOICING",
     material_next_action_label: "Review receipt and invoicing journey",
     material_next_action_detail: "Material quantities are accounted for. Confirm receipt evidence.",
@@ -61,6 +62,9 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     context.j16_set_detailed_preference(true);
     assert.strictEqual(context.j16_detailed_preference(), true);
     context.j16_set_detailed_preference(false);
+    const inconsistent = context.j16_guidance_state(frm, {...data(), evidence_consistent: false}, null);
+    assert(inconsistent.detail.includes("before any commercial treatment or lot closure is considered"));
+    assert(!inconsistent.detail.includes("settlement action"));
     const excess = context.j16_guidance_state(frm, data(), {enabled: true, journey_complete: false,
         items: [{subcontracting_order_item: "FG-A", stock_uom: "Kg", excess_reserved_qty: 201,
             issues: ["EXCESS_CAPACITY_COMMITMENT"]}],
@@ -74,6 +78,11 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     assert(historical.title.includes("No current material action required"));
     frm.doc.docstatus = 0;
     frm.doc.settlement_status = "Draft";
+    const deferred = context.j16_guidance_state(frm, data(), {enabled: true, journey_complete: true});
+    assert.strictEqual(deferred.tone, "amber");
+    assert(deferred.title.includes("Material position reconciled"));
+    assert(deferred.detail.includes("No commercial document or lot closure is authorised"));
+    assert(!deferred.title.includes("Ready for closure"));
     assert(html().includes("Physically reconciled"));
     assert(html().includes("What to do next"));
     assert(html().includes("Review receipt and invoicing journey"));
@@ -84,6 +93,8 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     assert(html().includes("/app/stock-entry/STE%2Fa%3F%22%3C%3E"));
     assert(html().includes("/app/subcontracting-receipt/SCR"));
     assert(html().includes("Settlement not enabled"));
+    assert(html().includes("Commercial Treatment"));
+    assert(html().includes("Commercial treatment not determined"));
     report.material_balanced = false;
     report.issues = ["MATERIAL_BALANCE_REMAINS"];
     report.material_accounted = false;

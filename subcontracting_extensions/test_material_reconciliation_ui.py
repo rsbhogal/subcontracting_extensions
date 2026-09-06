@@ -17,6 +17,13 @@ class TestMaterialReconciliationUI(unittest.TestCase):
             spec.loader.exec_module(self.module)
         self.reader = Mock(return_value={"settlement_enabled": False, "components": []})
         self.module.get_material_position = self.reader
+        self.module.assess_component_action_readiness = Mock(
+            side_effect=lambda report, can_write: dict(
+                report,
+                component_action_contract_version="J17",
+                commercial_review_permitted=can_write,
+            )
+        )
 
     def test_disabled_by_default_without_evidence_reads(self):
         self.assertEqual(self.module.get_material_panel("LOT"), {"enabled": False})
@@ -24,10 +31,20 @@ class TestMaterialReconciliationUI(unittest.TestCase):
 
     def test_enabled_delegates_to_permission_checked_reader(self):
         self.frappe.conf["v2_processor_first_material_facts"] = "1"
+        lot = SimpleNamespace(has_permission=Mock(return_value=True))
+        self.frappe.get_doc = Mock(return_value=lot)
         result = self.module.get_material_panel("LOT")
         self.reader.assert_called_once_with("LOT")
+        self.frappe.get_doc.assert_called_once_with("Processor Lot", "LOT")
+        lot.has_permission.assert_called_once_with("write")
+        self.module.assess_component_action_readiness.assert_called_once_with(
+            self.reader.return_value,
+            can_write=True,
+        )
         self.assertTrue(result["enabled"])
         self.assertFalse(result["settlement_enabled"])
+        self.assertEqual(result["component_action_contract_version"], "J17")
+        self.assertTrue(result["commercial_review_permitted"])
         self.assertNotIn("enabled", self.reader.return_value)
 
     def test_permission_error_propagates_without_partial_report(self):
@@ -35,6 +52,13 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.reader.side_effect = PermissionError
         with self.assertRaises(PermissionError):
             self.module.get_material_panel("LOT")
+
+    def test_read_only_permission_is_reported_without_enabling_action(self):
+        self.frappe.conf["v2_processor_first_material_facts"] = 1
+        lot = SimpleNamespace(has_permission=Mock(return_value=False))
+        self.frappe.get_doc = Mock(return_value=lot)
+        result = self.module.get_material_panel("LOT")
+        self.assertFalse(result["commercial_review_permitted"])
 
     def check_single_item_routing(self, enabled):
         spec = importlib.util.spec_from_file_location("j14_position_under_test",

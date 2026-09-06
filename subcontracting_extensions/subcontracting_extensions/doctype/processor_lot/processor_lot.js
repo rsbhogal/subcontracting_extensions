@@ -345,7 +345,7 @@ function j16_apply_view(frm, detailed) {
 function j16_guidance_state(frm, material, completion) {
     const completed_history = frm.doc.docstatus === 1 && frm.doc.settlement_status === "Completed";
     if (material.evidence_consistent !== true) return {tone: "red", title: __("Review material evidence"),
-        detail: __("Correct the highlighted material evidence before taking another settlement action."), link: ""};
+        detail: __("Correct the highlighted material evidence before any commercial treatment or lot closure is considered."), link: ""};
     if (material.material_settlement_eligible !== true) return {tone: "amber",
         title: __(material.material_next_action_label || "Account for remaining material"),
         detail: __(material.material_next_action_detail || "Complete the component actions shown below."), link: ""};
@@ -363,6 +363,9 @@ function j16_guidance_state(frm, material, completion) {
     if (completion?.enabled && completion.journey_complete !== true) return {tone: "amber",
         title: __("Complete receipt and invoicing evidence"),
         detail: __("Open Detailed view to see the first unverified SCR, Purchase Receipt, or Purchase Invoice."), link: ""};
+    if (material.commercial_policy_status === "DEFERRED") return {tone: "amber",
+        title: __("Material position reconciled"),
+        detail: __("Material and receipt evidence are complete. Commercial treatment has not been determined. No commercial document or lot closure is authorised."), link: ""};
     return {tone: "green", title: __("Ready for closure review"),
         detail: __("Material and receipt evidence are complete. Review commercial settlement before closing the lot."), link: ""};
 }
@@ -376,12 +379,14 @@ function render_j16_operational_guidance(frm) {
     const rows = (material.components || []).map(row => [j14_escape(row.component_item), j14_escape(row.stock_uom),
         j14_qty(row.physical_remaining_qty), j14_qty(row.applied_credit_qty), j14_qty(row.unaccounted_remaining_qty),
         j14_badge(__(row.material_next_action_label || "Review component evidence"),
-            row.evidence_consistent !== true ? "red" : row.material_settlement_eligible === true ? "green" : "amber")]);
+            row.evidence_consistent !== true ? "red" : row.material_settlement_eligible === true ? "green" : "amber"),
+        `<div>${j14_badge(__(row.commercial_treatment_label || "Commercial treatment not determined"), "neutral")}</div>
+            <div class="text-muted" style="margin-top:5px">${j14_escape(__(row.component_action_detail || "No commercial document is authorised."))}</div>`]);
     field.$wrapper.html(`<div style="border:1px solid #8baecb;border-radius:8px;padding:14px;background:#f7fbfe">
         <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("What to do next"))}</div>
         <div>${j14_badge(state.title, state.tone)} ${state.link}</div>
         <div style="margin-top:8px">${j14_escape(state.detail)}</div>
-        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Material Action"], rows)}
+        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Material Action", "Commercial Treatment"], rows)}
         <label style="display:inline-flex;align-items:center;gap:7px;margin:4px 0 0;cursor:pointer;font-weight:500">
             <input type="checkbox" data-j16-detailed ${detailed ? "checked" : ""}>
             ${j14_escape(__("Show detailed audit evidence"))}
@@ -459,13 +464,15 @@ function build_j14_material_panel(report) {
         <p class="text-muted">${text(__(report.settlement_eligibility_scope || "Material quantities only; no settlement write, receipt completion, commercial approval, or lot closure"))}</p>
         <p class="text-muted">${text(__("Evidence covers the entire SCO. Applied credit accounts for a physical balance; it does not mean the material was consumed or returned."))}</p>`;
     if (codes.length) html += `<p>${text(codes.map(code => __(messages[code] || code)).join("; "))}</p>`;
-    html += j14_table(["Component", "UOM", "Sent", "Consumed", "Returned", "Physical Remaining", "Applied Credit", "Unaccounted Remaining", "Evidence Status", "Next Material Action"],
+    html += j14_table(["Component", "UOM", "Sent", "Consumed", "Returned", "Physical Remaining", "Applied Credit", "Unaccounted Remaining", "Evidence Status", "Next Material Action", "Commercial Treatment"],
         (report.components || []).map(row => [text(row.component_item), text(row.stock_uom), text(j14_qty(row.supplied_qty)),
             text(j14_qty(row.consumed_qty)), text(j14_qty(row.returned_qty)), text(j14_qty(row.physical_remaining_qty)),
             text(j14_qty(row.applied_credit_qty)), j14_badge(j14_qty(row.unaccounted_remaining_qty),
                 Number(row.unaccounted_remaining_qty) < 0 ? "red" : Number(row.unaccounted_remaining_qty) > 0 ? "amber" : "neutral"), status(row),
             `<div>${j14_badge(__(row.material_next_action_label || "Review component evidence"), action_tone(row))}</div>
-                <div class="text-muted" style="margin-top:5px">${text(__(row.material_next_action_detail || ""))}</div>`]));
+                <div class="text-muted" style="margin-top:5px">${text(__(row.material_next_action_detail || ""))}</div>`,
+            `<div>${j14_badge(__(row.commercial_treatment_label || "Commercial treatment not determined"), "neutral")}</div>
+                <div class="text-muted" style="margin-top:5px">${text(__(row.component_action_detail || "No commercial document is authorised."))}</div>`]));
     html += `<details style="margin-top:14px"><summary style="cursor:pointer;display:list-item;
         width:fit-content;border:1px solid #8baecb;border-radius:6px;padding:9px 14px;
         background:#eaf3fb;color:#174c75;font-weight:600;box-shadow:0 1px 2px #00000012">
