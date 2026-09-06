@@ -3,7 +3,9 @@ const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
 const path = require("path");
-const context = {__: s => s, frappe: {ui: {form: {on() {}}}, utils: {
+const storage = new Map();
+const context = {__: s => s, localStorage: {getItem: key => storage.get(key) || null,
+    setItem: (key, value) => storage.set(key, value)}, frappe: {session: {user: "user@example.com"}, ui: {form: {on() {}}}, utils: {
     escape_html: s => String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")
 }}};
 vm.createContext(context);
@@ -20,13 +22,21 @@ function form() {
 }
 const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: "SCO", material_balanced: true,
     material_accounted: true,
+    material_settlement_eligible: true, material_next_action: "REVIEW_RECEIPT_AND_INVOICING",
+    material_next_action_label: "Review receipt and invoicing journey",
+    material_next_action_detail: "Material quantities are accounted for. Confirm receipt evidence.",
+    settlement_eligibility_scope: "Material quantities only; no settlement write",
     evidence_consistent: true, settlement_enabled: false, issues: [],
     components: [{component_item: "Wire <unsafe>", stock_uom: "Kg", supplied_qty: 500, consumed_qty: 500,
         returned_qty: 0, remaining_qty: 0, physical_remaining_qty: 0, applied_credit_qty: 0,
-        unaccounted_remaining_qty: 0, material_balanced: true, material_accounted: true, evidence_consistent: true, issues: []},
+        unaccounted_remaining_qty: 0, material_balanced: true, material_accounted: true, evidence_consistent: true,
+        material_settlement_eligible: true, material_next_action_label: "No further material action",
+        material_next_action_detail: "Physically reconciled.", issues: []},
         {component_item: "Blank", stock_uom: "Units", supplied_qty: 100, consumed_qty: 100,
         returned_qty: 0, remaining_qty: 0, physical_remaining_qty: 0, applied_credit_qty: 0,
-        unaccounted_remaining_qty: 0, material_balanced: true, material_accounted: true, evidence_consistent: true, issues: []}],
+        unaccounted_remaining_qty: 0, material_balanced: true, material_accounted: true, evidence_consistent: true,
+        material_settlement_eligible: true, material_next_action_label: "No further material action",
+        material_next_action_detail: "Physically reconciled.", issues: []}],
     sources: [{doctype: "Stock Entry", name: 'STE/a?"<>', docstatus: 1}],
     movements: [{parent: "STE", evidence_role: "Physical transfer or return", item_code: "Wire", stock_uom: "Kg", stock_qty: 500,
         s_warehouse: "Factory", t_warehouse: "Processor", sco_rm_detail: "RM"}],
@@ -39,8 +49,35 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     await context.render_j14_material_panel(frm);
     const html = () => frm.get_field("material_reconciliation_html").$wrapper.markup;
     const hidden = () => frm.get_field("material_reconciliation_section").df.hidden;
+    assert.strictEqual(hidden(), 1);
+    assert.strictEqual(frm.get_field("operational_guidance_section").df.hidden, 0);
+    assert(frm.get_field("operational_guidance_html").$wrapper.markup.includes("Show detailed audit evidence"));
+    context.j16_apply_view(frm, false);
+    assert.strictEqual(frm.get_field("settlement_policy_override_section").df.hidden, 1);
+    context.j16_apply_view(frm, true);
     assert.strictEqual(hidden(), 0);
+    context.j16_apply_view(frm, false);
+    assert.strictEqual(hidden(), 1);
+    context.j16_set_detailed_preference(true);
+    assert.strictEqual(context.j16_detailed_preference(), true);
+    context.j16_set_detailed_preference(false);
+    const excess = context.j16_guidance_state(frm, data(), {enabled: true, journey_complete: false,
+        items: [{subcontracting_order_item: "FG-A", stock_uom: "Kg", excess_reserved_qty: 201,
+            issues: ["EXCESS_CAPACITY_COMMITMENT"]}],
+        journeys: [{subcontracting_order_item: "FG-A", processor_lot_receipt: 'PLR/a?"<>', scr_verified: false}]});
+    assert(excess.title.includes("Review draft receipt reservation"));
+    assert(excess.detail.includes("201.000 Kg"));
+    assert(excess.link.includes("/app/processor-lot-receipt/PLR%2Fa%3F%22%3C%3E"));
+    frm.doc.docstatus = 1;
+    frm.doc.settlement_status = "Completed";
+    const historical = context.j16_guidance_state(frm, data(), {enabled: true, journey_complete: false});
+    assert(historical.title.includes("No current material action required"));
+    frm.doc.docstatus = 0;
+    frm.doc.settlement_status = "Draft";
     assert(html().includes("Physically reconciled"));
+    assert(html().includes("What to do next"));
+    assert(html().includes("Review receipt and invoicing journey"));
+    assert(html().includes("Next Material Action"));
     assert(html().includes('data-status-tone="green"'));
     assert(html().includes("500.000") && html().includes("100.000") && !html().includes("600.000"));
     assert(html().includes("Wire &lt;unsafe&gt;") && !html().includes("Wire <unsafe>"));
@@ -50,9 +87,14 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     report.material_balanced = false;
     report.issues = ["MATERIAL_BALANCE_REMAINS"];
     report.material_accounted = false;
+    report.material_settlement_eligible = false;
+    report.material_next_action_label = "Account for remaining material";
+    report.material_next_action_detail = "Complete the indicated component actions.";
     Object.assign(report.components[0], {material_balanced: false, material_accounted: false,
         remaining_qty: 0.000001, physical_remaining_qty: 0.000001,
-        unaccounted_remaining_qty: 0.000001, issues: report.issues});
+        unaccounted_remaining_qty: 0.000001, material_settlement_eligible: false,
+        material_next_action_label: "Account for remaining material",
+        material_next_action_detail: "Record return, credit, or recovery.", issues: report.issues});
     await context.render_j14_material_panel(frm);
     assert(html().includes("0.000001"));
     assert(html().includes('data-status-tone="amber"'));
@@ -116,5 +158,5 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     context.frappe.call = () => {throw Error("Should not call for new document");};
     await context.render_j14_material_panel(frm);
     assert.strictEqual(hidden(), 1);
-    console.log("J15C material balances, applied-credit links, statuses, precision, escaping, permissions and stale responses: PASS");
+    console.log("J16B simple/detailed view, exact guidance, evidence links, escaping, permissions and stale responses: PASS");
 })().catch(error => {console.error(error); process.exitCode = 1;});

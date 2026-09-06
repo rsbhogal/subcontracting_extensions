@@ -33,6 +33,8 @@
   "settlement_date",
   "settlement_status",
   "last_receipt_date",
+  "operational_guidance_section",
+  "operational_guidance_html",
   "receipt_summary_section",
   "receipt_count",
   "receipt_stock_uom",
@@ -63,6 +65,16 @@
   "amended_from"
  ],
  "fields": [
+  {
+   "fieldname": "operational_guidance_section",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "Current Position"
+  },
+  {
+   "fieldname": "operational_guidance_html",
+   "fieldtype": "HTML"
+  },
   {
    "fieldname": "material_reconciliation_section",
    "fieldtype": "Section Break",

@@ -52,7 +52,8 @@ def read_evidence(lot_name, sco, exclude_receipt=None):
                 "allocated_accepted_qty", "allocated_invoice_qty"])
     parents = sorted({row.parent for row in allocations})
     receipts = frappe.get_all("Processor Lot Receipt", filters={"name": ["in", parents], "docstatus": ["!=", 2]},
-        fields=["name", "docstatus", "physical_receipt_date", "subcontracting_receipt", "purchase_receipt", "purchase_invoice"]) if parents else []
+        fields=["name", "docstatus", "receipt_structure_version", "physical_receipt_date",
+                "subcontracting_receipt", "purchase_receipt", "purchase_invoice"]) if parents else []
     scr_names = sorted({row.subcontracting_receipt for row in receipts if row.subcontracting_receipt})
     submitted = frappe.get_all("Subcontracting Receipt", filters={"name": ["in", scr_names], "docstatus": 1},
         fields=["name"]) if scr_names else []

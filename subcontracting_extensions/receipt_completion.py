@@ -56,6 +56,7 @@ def build_completion(sco, evidence, documents):
             subcontracting_receipt=receipt.get("subcontracting_receipt"),
             purchase_receipt=receipt.get("purchase_receipt"),
             purchase_invoice=receipt.get("purchase_invoice"),
+            legacy_evidence=receipt.get("receipt_structure_version") == "Legacy Single Item",
             scr_verified=False, pr_verified=False, pi_verified=False,
             issues=[],
         )
@@ -140,6 +141,7 @@ def build_completion(sco, evidence, documents):
 
     for key, item in items.items():
         own = [row for row in journeys if row["subcontracting_order_item"] == key]
+        item.legacy_evidence_only = bool(own) and all(row["legacy_evidence"] for row in own)
         item.native_receipts_without_verified_allocation_qty = quantity(
             item.native_received_qty - item.submitted_scr_qty
         )
@@ -162,9 +164,13 @@ def build_completion(sco, evidence, documents):
         # Completion of invoicing is not approval of a quantity variance.
         item.submitted_invoice_vs_accepted_qty = quantity(item.submitted_pi_qty - item.submitted_scr_qty)
 
+    incomplete_items = [row for row in items.values() if not row.journey_complete]
     report.update(
         journeys=journeys,
         journey_complete=bool(items) and all(row.journey_complete for row in items.values()),
+        legacy_evidence_only=bool(incomplete_items) and all(
+            row.legacy_evidence_only for row in incomplete_items
+        ),
         settlement_enabled=False,
         evidence_scope="Linked allocation rows only; not a settlement authorization",
     )

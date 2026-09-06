@@ -57,7 +57,8 @@ class TestReceiptCompletion(unittest.TestCase):
             self.pi.items.append(record(name="PI-" + key, purchase_receipt="PR", pr_detail="PR-" + key,
                 purchase_order="PO", po_detail="PO-" + key, item_code="SERVICE-" + key, stock_uom=uom, stock_qty=qty))
         self.receipts = [record(name="PLR", docstatus=0, subcontracting_receipt="SCR",
-            purchase_receipt="PR", purchase_invoice="PI", physical_receipt_date="2026-09-01")]
+            purchase_receipt="PR", purchase_invoice="PI", physical_receipt_date="2026-09-01",
+            receipt_structure_version="V2 Itemized")]
         self.submitted = {"SCR"}
 
     def build(self):
@@ -107,6 +108,21 @@ class TestReceiptCompletion(unittest.TestCase):
     def test_wrong_scr_backlink_is_not_recognized(self):
         self.scr.custom_processor_lot_receipt = "OTHER"
         self.assertFalse(self.build()["journeys"][0]["scr_verified"])
+
+    def test_legacy_evidence_is_classified_without_weakening_verification(self):
+        self.receipts[0].receipt_structure_version = "Legacy Single Item"
+        self.scr.custom_processor_lot_receipt = "OTHER"
+        result = self.build()
+        self.assertFalse(result["journey_complete"])
+        self.assertTrue(result["legacy_evidence_only"])
+        self.assertTrue(result["journeys"][0]["legacy_evidence"])
+        self.assertIn("SCR_ROW_LINEAGE_MISMATCH", result["journeys"][0]["issues"])
+
+    def test_v2_mismatch_is_not_classified_as_legacy(self):
+        self.scr.custom_processor_lot_receipt = "OTHER"
+        result = self.build()
+        self.assertFalse(result["legacy_evidence_only"])
+        self.assertFalse(result["journeys"][0]["legacy_evidence"])
 
     def test_return_invoice_is_not_recognized(self):
         self.pi.is_return = 1

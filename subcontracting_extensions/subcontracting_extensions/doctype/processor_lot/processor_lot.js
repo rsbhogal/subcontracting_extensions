@@ -29,6 +29,8 @@ frappe.ui.form.on("Processor Lot", {
     },
 
     async refresh(frm) {
+        frm.__j16_completion_report = null;
+        frm.__j16_material_report = null;
         void render_j14_material_panel(frm);
         if (await render_multi_item_receipt_checkpoint(frm)) return;
         set_field_properties(frm);
@@ -147,7 +149,9 @@ async function render_multi_item_receipt_checkpoint(frm) {
             : `<tr><td colspan="${headers.length}">${esc(__("No recorded receipt items."))}</td></tr>`}</tbody></table></div>`;
     const set_panel = (field, html) => frm.get_field(field)?.$wrapper.html(html);
     if (completion?.enabled) {
+        frm.__j16_completion_report = completion;
         render_j12_completion_panels(frm, completion, table, qty, esc);
+        render_j16_operational_guidance(frm);
         hide_items_grid_controls(frm);
         return true;
     }
@@ -192,13 +196,18 @@ function render_j12_completion_panels(frm, report, table, qty, esc) {
     const issues = codes => (codes || []).map(code => __(messages[code] || code)).join("; ") || __("None");
     const issue_tone = codes => (codes || []).some(code => code.includes("MISMATCH")
         || code === "EXCESS_CAPACITY_COMMITMENT") ? "red" : "amber";
-    const warning = codes => j14_badge(issues(codes), codes?.length ? issue_tone(codes) : "green");
-    const evidence = (doctype, name, verified) => j14_link(doctype, name)
-        + " / " + j14_badge(verified === true ? __("Verified") : __("Not verified"), verified === true ? "green" : "amber");
+    const legacy_text = __("Legacy receipt evidence—retained for audit but not created with V2 row-level links");
+    const warning = (codes, legacy = false) => j14_badge(
+        legacy && codes?.length ? legacy_text : issues(codes),
+        codes?.length ? (legacy ? "neutral" : issue_tone(codes)) : "green");
+    const evidence = (doctype, name, verified, legacy = false) => j14_link(doctype, name)
+        + " / " + j14_badge(verified === true ? __("Verified") : legacy ? __("Legacy evidence") : __("Not verified"),
+            verified === true ? "green" : legacy ? "neutral" : "amber");
     const status = report.journey_complete === true
         ? __("Receipt and invoicing journey complete—not settlement approval.")
         : __("Receipt and invoicing evidence requires review—not settlement approval.");
-    const notice = `<p>${j14_badge(status, report.journey_complete === true ? "green" : issue_tone(report.items.flatMap(item => item.issues || [])))}</p>
+    const notice = `<p>${j14_badge(status, report.journey_complete === true ? "green" : report.legacy_evidence_only === true
+        ? "neutral" : issue_tone(report.items.flatMap(item => item.issues || [])))}</p>
         <p class="text-muted">${esc(__("Multi-item settlement remains disabled. Figures are separate for each item and UOM."))}</p>`;
     // Physical availability has its own status; invoicing cannot make it green.
     const physical_ok = report.items.length > 0 && report.items.every(item =>
@@ -216,15 +225,18 @@ function render_j12_completion_panels(frm, report, table, qty, esc) {
     set("health_panel_html", notice + j14_table(["Item", "UOM", "Verified SCR", "Verified PR", "Verified PI", "PI − SCR", "Journey", "Evidence warnings"],
         report.items.map(item => [text(item.processed_item), text(item.stock_uom), text(j14_qty(item.submitted_scr_qty)),
             text(j14_qty(item.submitted_pr_qty)), text(j14_qty(item.submitted_pi_qty)), text(j14_qty(item.submitted_invoice_vs_accepted_qty)),
-            j14_badge(item.journey_complete === true ? __("Receipt Journey Complete") : __("Review required"),
-                item.journey_complete === true ? "green" : issue_tone(item.issues)), warning(item.issues)]))
+            j14_badge(item.journey_complete === true ? __("Receipt Journey Complete")
+                : item.legacy_evidence_only === true ? __("Legacy evidence") : __("Review required"),
+                item.journey_complete === true ? "green" : item.legacy_evidence_only === true ? "neutral" : issue_tone(item.issues)),
+            warning(item.issues, item.legacy_evidence_only === true)]))
         + `<p class="text-muted">${esc(__("Verified quantities cover linked allocation evidence only. Any invoice-versus-accepted variance still requires separate settlement review."))}</p>`);
     set("receipt_journey_html", j14_table(["Receipt", "Item", "UOM", "Allocated Accepted", "Allocated Invoice", "SCR / Evidence", "PR / Evidence", "PI / Evidence", "Warnings"],
         report.journeys.map(row => [j14_link("Processor Lot Receipt", row.processor_lot_receipt), text(row.processed_item), text(row.stock_uom),
             text(j14_qty(row.allocated_accepted_qty)), text(j14_qty(row.allocated_invoice_qty)),
-            evidence("Subcontracting Receipt", row.subcontracting_receipt, row.scr_verified),
-            evidence("Purchase Receipt", row.purchase_receipt, row.pr_verified),
-            evidence("Purchase Invoice", row.purchase_invoice, row.pi_verified), warning(row.issues)])));
+            evidence("Subcontracting Receipt", row.subcontracting_receipt, row.scr_verified, row.legacy_evidence),
+            evidence("Purchase Receipt", row.purchase_receipt, row.pr_verified, row.legacy_evidence),
+            evidence("Purchase Invoice", row.purchase_invoice, row.pi_verified, row.legacy_evidence),
+            warning(row.issues, row.legacy_evidence)])));
 }
 
 
@@ -270,6 +282,8 @@ function j14_table(headers, rows) {
 async function render_j14_material_panel(frm) {
     const wrapper = frm.get_field("material_reconciliation_html")?.$wrapper;
     if (!wrapper) return;
+    frm.get_field("operational_guidance_html")?.$wrapper.html("");
+    frm.set_df_property("operational_guidance_section", "hidden", 1);
     const ticket = frm.__j14_material_request = (frm.__j14_material_request || 0) + 1;
     const name = frm.doc.name, sco = frm.doc.subcontracting_order;
     wrapper.html("");
@@ -283,14 +297,103 @@ async function render_j14_material_panel(frm) {
         if (!current() || !response.message?.enabled) return;
         const report = response.message;
         if (report.processor_lot !== name || report.subcontracting_order !== sco) throw Error("Evidence identity mismatch");
+        frm.__j16_material_report = report;
         wrapper.html(build_j14_material_panel(report));
         frm.set_df_property("material_reconciliation_section", "hidden", 0);
+        render_j16_operational_guidance(frm);
     } catch (error) {
         if (!current()) return;
         wrapper.html(`<p>${j14_badge(__("Material evidence unavailable"), "red")}</p>
             <p>${j14_escape(__("Check read permissions and source evidence, then reload. No material status has been verified."))}</p>`);
         frm.set_df_property("material_reconciliation_section", "hidden", 0);
     }
+}
+
+const J16_DETAIL_SECTIONS = ["processor_settlement_policy_section", "settlement_policy_override_section", "settlement_details_section",
+    "receipt_summary_section", "receipt_journey_section", "physical_receipt_position_section",
+    "health_panel_section", "material_reconciliation_section", "items_section",
+    "commercial_details_section", "generated_document_section"];
+
+function j16_detailed_preference() {
+    try {
+        return globalThis.localStorage?.getItem(`processor-lot-detailed:${frappe.session?.user || "Guest"}`) === "1";
+    } catch (error) {
+        return false;
+    }
+}
+
+function j16_set_detailed_preference(value) {
+    try {
+        globalThis.localStorage?.setItem(`processor-lot-detailed:${frappe.session?.user || "Guest"}`, value ? "1" : "0");
+    } catch (error) {
+        // Browser storage is optional; the current form still toggles safely.
+    }
+}
+
+function j16_apply_view(frm, detailed) {
+    for (const fieldname of J16_DETAIL_SECTIONS) {
+        if (!frm.get_field(fieldname)) continue;
+        let hidden = detailed ? 0 : 1;
+        if (fieldname === "generated_document_section") {
+            hidden = detailed && frm.doc.docstatus === 1 && frm.doc.settlement_status === "Completed" ? 0 : 1;
+        }
+        frm.set_df_property(fieldname, "hidden", hidden);
+    }
+    frm.set_df_property("operational_guidance_section", "hidden", 0);
+}
+
+function j16_guidance_state(frm, material, completion) {
+    const completed_history = frm.doc.docstatus === 1 && frm.doc.settlement_status === "Completed";
+    if (material.evidence_consistent !== true) return {tone: "red", title: __("Review material evidence"),
+        detail: __("Correct the highlighted material evidence before taking another settlement action."), link: ""};
+    if (material.material_settlement_eligible !== true) return {tone: "amber",
+        title: __(material.material_next_action_label || "Account for remaining material"),
+        detail: __(material.material_next_action_detail || "Complete the component actions shown below."), link: ""};
+    if (completed_history) return {tone: "green", title: __("No current material action required"),
+        detail: __("This completed historical lot has accounted material quantities. Legacy receipt evidence remains available in Detailed view."), link: ""};
+    const completion_items = completion?.items || [];
+    const excess = completion_items.find(item => (item.issues || []).includes("EXCESS_CAPACITY_COMMITMENT"));
+    if (excess) {
+        const journey = (completion.journeys || []).find(row => row.subcontracting_order_item === excess.subcontracting_order_item
+            && row.scr_verified !== true);
+        const link = journey ? j14_link("Processor Lot Receipt", journey.processor_lot_receipt) : "";
+        return {tone: "amber", title: __("Review draft receipt reservation"),
+            detail: __(`A draft receipt reserves ${j14_qty(excess.excess_reserved_qty)} ${excess.stock_uom} beyond remaining capacity. Correct or remove it before continuing.`), link};
+    }
+    if (completion?.enabled && completion.journey_complete !== true) return {tone: "amber",
+        title: __("Complete receipt and invoicing evidence"),
+        detail: __("Open Detailed view to see the first unverified SCR, Purchase Receipt, or Purchase Invoice."), link: ""};
+    return {tone: "green", title: __("Ready for closure review"),
+        detail: __("Material and receipt evidence are complete. Review commercial settlement before closing the lot."), link: ""};
+}
+
+function render_j16_operational_guidance(frm) {
+    const field = frm.get_field("operational_guidance_html");
+    const material = frm.__j16_material_report;
+    if (!field?.$wrapper || !material || frm.is_new()) return;
+    const detailed = j16_detailed_preference();
+    const state = j16_guidance_state(frm, material, frm.__j16_completion_report);
+    const rows = (material.components || []).map(row => [j14_escape(row.component_item), j14_escape(row.stock_uom),
+        j14_qty(row.physical_remaining_qty), j14_qty(row.applied_credit_qty), j14_qty(row.unaccounted_remaining_qty),
+        j14_badge(__(row.material_next_action_label || "Review component evidence"),
+            row.evidence_consistent !== true ? "red" : row.material_settlement_eligible === true ? "green" : "amber")]);
+    field.$wrapper.html(`<div style="border:1px solid #8baecb;border-radius:8px;padding:14px;background:#f7fbfe">
+        <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("What to do next"))}</div>
+        <div>${j14_badge(state.title, state.tone)} ${state.link}</div>
+        <div style="margin-top:8px">${j14_escape(state.detail)}</div>
+        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Material Action"], rows)}
+        <label style="display:inline-flex;align-items:center;gap:7px;margin:4px 0 0;cursor:pointer;font-weight:500">
+            <input type="checkbox" data-j16-detailed ${detailed ? "checked" : ""}>
+            ${j14_escape(__("Show detailed audit evidence"))}
+        </label>
+    </div>`);
+    j16_apply_view(frm, detailed);
+    const toggle = field.$wrapper.find?.("[data-j16-detailed]");
+    toggle?.off?.("change.j16").on?.("change.j16", function () {
+        const value = Boolean(this.checked);
+        j16_set_detailed_preference(value);
+        j16_apply_view(frm, value);
+    });
 }
 
 function build_j14_material_panel(report) {
@@ -342,15 +445,27 @@ function build_j14_material_panel(report) {
         : row.material_accounted === true ? __("Accounted by credit") : __("Unaccounted balance remains"),
         row.evidence_consistent === true && (row.material_balanced === true || row.material_accounted === true)
             ? "green" : tone(row.issues || []));
+    const action_tone = row => row.evidence_consistent !== true ? "red"
+        : row.material_settlement_eligible === true ? "green" : "amber";
+    const overall_action_tone = report.evidence_consistent !== true ? "red"
+        : report.material_settlement_eligible === true ? "green" : "amber";
     let html = `<p>${j14_badge(summary, summary_tone)}</p>
         <p>${j14_badge(__("Settlement not enabled in this panel"), "neutral")}</p>
-        <p class="text-muted">${text(__("Evidence covers the entire SCO. Applied credit accounts for a physical balance; it does not mean the material was consumed or returned. This is not lot closure or settlement approval."))}</p>`;
+        <div style="border:1px solid #8baecb;border-radius:7px;padding:10px 12px;margin:10px 0;background:#f5f9fc">
+            <strong>${text(__("What to do next"))}:</strong>
+            ${j14_badge(__(report.material_next_action_label || "Review material evidence"), overall_action_tone)}
+            <div style="margin-top:6px">${text(__(report.material_next_action_detail || "Review the component evidence before continuing."))}</div>
+        </div>
+        <p class="text-muted">${text(__(report.settlement_eligibility_scope || "Material quantities only; no settlement write, receipt completion, commercial approval, or lot closure"))}</p>
+        <p class="text-muted">${text(__("Evidence covers the entire SCO. Applied credit accounts for a physical balance; it does not mean the material was consumed or returned."))}</p>`;
     if (codes.length) html += `<p>${text(codes.map(code => __(messages[code] || code)).join("; "))}</p>`;
-    html += j14_table(["Component", "UOM", "Sent", "Consumed", "Returned", "Physical Remaining", "Applied Credit", "Unaccounted Remaining", "Evidence Status"],
+    html += j14_table(["Component", "UOM", "Sent", "Consumed", "Returned", "Physical Remaining", "Applied Credit", "Unaccounted Remaining", "Evidence Status", "Next Material Action"],
         (report.components || []).map(row => [text(row.component_item), text(row.stock_uom), text(j14_qty(row.supplied_qty)),
             text(j14_qty(row.consumed_qty)), text(j14_qty(row.returned_qty)), text(j14_qty(row.physical_remaining_qty)),
             text(j14_qty(row.applied_credit_qty)), j14_badge(j14_qty(row.unaccounted_remaining_qty),
-                Number(row.unaccounted_remaining_qty) < 0 ? "red" : Number(row.unaccounted_remaining_qty) > 0 ? "amber" : "neutral"), status(row)]));
+                Number(row.unaccounted_remaining_qty) < 0 ? "red" : Number(row.unaccounted_remaining_qty) > 0 ? "amber" : "neutral"), status(row),
+            `<div>${j14_badge(__(row.material_next_action_label || "Review component evidence"), action_tone(row))}</div>
+                <div class="text-muted" style="margin-top:5px">${text(__(row.material_next_action_detail || ""))}</div>`]));
     html += `<details style="margin-top:14px"><summary style="cursor:pointer;display:list-item;
         width:fit-content;border:1px solid #8baecb;border-radius:6px;padding:9px 14px;
         background:#eaf3fb;color:#174c75;font-weight:600;box-shadow:0 1px 2px #00000012">

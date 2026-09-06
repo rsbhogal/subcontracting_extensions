@@ -7,6 +7,7 @@ Native supplied_qty is gross; total_supplied_qty is only a cross-check.
 """
 
 from subcontracting_extensions.material_reconciliation import _qty, reconcile_material
+from subcontracting_extensions.material_settlement_eligibility import assess_material_settlement
 
 
 def get_material_position(processor_lot):
@@ -206,6 +207,7 @@ def _read_material_position(api, processor_lot):
         for row in report["components"]:
             row["issues"] = list(dict.fromkeys(row["issues"] + issues))
             row["evidence_consistent"] = row["material_balanced"] = row["material_accounted"] = False
+    report = assess_material_settlement(report)
     report.update(processor_lot=lot.name, subcontracting_order=sco.name,
                   evidence_scope="Entire SCO; quantity evidence only, not lot completion or settlement approval",
                   reader_issues=issues, movements=movements, receipts=receipts,

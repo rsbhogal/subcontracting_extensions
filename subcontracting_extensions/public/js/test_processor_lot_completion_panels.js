@@ -60,6 +60,19 @@ const data = () => ({enabled: true, is_multi_item: true, journey_complete: true,
     assert(html("health_panel_html").includes("Receipt commitments exceed remaining capacity"));
     assert(html("health_panel_html").includes("&lt;unknown&gt;"));
     assert(html("receipt_journey_html").replace(/<[^>]*>/g, "").includes("PI / Not verified"));
+    report.legacy_evidence_only = true;
+    report.items[0].legacy_evidence_only = true;
+    report.journeys[0].legacy_evidence = true;
+    report.journeys[0].issues = ["PI_ROW_LINEAGE_MISMATCH"];
+    await context.render_multi_item_receipt_checkpoint(frm);
+    assert(html("health_panel_html").includes("Legacy evidence"));
+    assert(html("health_panel_html").includes('data-status-tone="neutral"'));
+    assert(html("receipt_journey_html").includes("Legacy receipt evidence—retained for audit"));
+    assert(!html("receipt_journey_html").includes('data-status-tone="red"'));
+    report.legacy_evidence_only = false;
+    report.items[0].legacy_evidence_only = false;
+    report.journeys[0].legacy_evidence = false;
+    report.journeys[0].issues = [];
     context.frappe.call = async request => {
         if (request.method.includes("receipt_completion")) throw Error("Permission denied");
         return {message: {enabled: true, is_multi_item: true}};
