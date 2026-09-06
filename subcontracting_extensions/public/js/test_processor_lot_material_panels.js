@@ -107,12 +107,27 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
         component_return_label: "Draft component return already exists",
         component_return_detail: "Review draft.", component_return_source_warehouse: "Processor",
         component_return_target_warehouse: "Raw - BPL", draft_return_reserved_qty: 2,
+        component_return_source_stock_qty: 5,
         return_qty_available_to_prepare: 3, stock_uom: "Kg", component_return_blockers: [],
         component_return_code: "OPEN_EXISTING_DRAFT_RETURN",
         draft_component_returns: [{name: 'STE/a?"<>'}]
     });
     assert(draft_return_html.includes("Draft Stock Entry"));
+    assert(draft_return_html.includes("Current source stock") && draft_return_html.includes("5.000"));
     assert(draft_return_html.includes("/app/stock-entry/STE%2Fa%3F%22%3C%3E"));
+    assert(draft_return_html.includes('data-status-tone="amber"'));
+    assert(draft_return_html.includes("color:#795000"));
+    const action_html = context.j18_component_return_html({
+        component_return_label: "Component return can be prepared",
+        component_return_detail: "Prepare full quantity.", component_return_source_warehouse: "Processor",
+        component_return_target_warehouse: "Cutting - BPL", draft_return_reserved_qty: 0,
+        return_qty_available_to_prepare: 1, stock_uom: "Units", component_return_blockers: [],
+        component_return_code: "READY_TO_PREPARE_COMPONENT_RETURN", component_return_action_available: true,
+        component_return_expected_qty: 1, sco_supplied_item: 'RM/a?"<>'
+    });
+    assert(action_html.includes("Prepare full draft return"));
+    assert(action_html.includes("RM%2Fa%3F%22%3C%3E"));
+    assert(!draft_return_html.includes("Prepare full draft return"));
     assert(html().includes("Commercial treatment not determined"));
     report.material_balanced = false;
     report.issues = ["MATERIAL_BALANCE_REMAINS"];

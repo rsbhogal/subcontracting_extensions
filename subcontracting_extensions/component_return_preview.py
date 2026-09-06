@@ -43,6 +43,7 @@ def assess_component_return_preview(
             "source_warehouse": result.get("supplier_warehouse"),
             "target_warehouse": component.get("reserve_warehouse"),
             "component_item": component.get("component_item"),
+            "subcontracted_item": component.get("component_return_subcontracted_item"),
             "stock_uom": component.get("stock_uom"),
             "sco_supplied_item": row_name,
         }
@@ -58,6 +59,13 @@ def assess_component_return_preview(
             blockers.append("RESERVE_WAREHOUSE_COMPANY_MISMATCH")
         if expected["target_warehouse"] == expected["source_warehouse"]:
             blockers.append("RETURN_WAREHOUSES_MUST_DIFFER")
+        if (
+            result.get("processor_lot_docstatus") == 1
+            and result.get("processor_lot_settlement_status") == "Completed"
+        ):
+            blockers.append("PROCESSOR_LOT_ALREADY_COMPLETED")
+        elif result.get("processor_lot_settlement_status") not in (None, "", "Draft"):
+            blockers.append("PROCESSOR_LOT_SETTLEMENT_ALREADY_STARTED")
 
         for draft in matching:
             draft_issues = []
@@ -67,6 +75,7 @@ def assess_component_return_preview(
                     break
             if (
                 draft.get("item_code") != expected["component_item"]
+                or draft.get("subcontracted_item") != expected["subcontracted_item"]
                 or draft.get("stock_uom") != expected["stock_uom"]
             ):
                 draft_issues.append("DRAFT_RETURN_ITEM_UOM_MISMATCH")
@@ -99,6 +108,11 @@ def assess_component_return_preview(
             blockers.append("DRAFT_RETURN_EXCEEDS_UNACCOUNTED")
         if len(valid) > 1:
             blockers.append("MULTIPLE_ACTIVE_DRAFT_RETURNS")
+        if "component_return_source_stock_qty" in component:
+            source_stock = _qty(component.get("component_return_source_stock_qty"))
+            stock_required = reserved if valid else max(available, _qty(0))
+            if source_stock < stock_required:
+                blockers.append("INSUFFICIENT_COMPONENT_RETURN_SOURCE_STOCK")
         blockers = list(dict.fromkeys(blockers))
 
         if blockers or component.get("evidence_consistent") is not True:
@@ -173,11 +187,22 @@ def read_component_return_preview(api, report):
         native = supplied.get(component.get("sco_supplied_item"))
         if native:
             component["reserve_warehouse"] = native.get("reserve_warehouse")
+            component["component_return_subcontracted_item"] = native.get("main_item_code")
             if native.get("reserve_warehouse"):
                 warehouse = api.get_doc("Warehouse", native.get("reserve_warehouse"))
                 warehouse.check_permission("read")
                 component["reserve_warehouse_company"] = warehouse.get("company")
                 component["reserve_warehouse_disabled"] = bool(warehouse.get("disabled"))
+        component["component_return_source_stock_qty"] = float(_qty(
+            api.db.get_value(
+                "Bin",
+                {
+                    "item_code": component.get("component_item"),
+                    "warehouse": sco.get("supplier_warehouse"),
+                },
+                "actual_qty",
+            ) or 0
+        ))
 
     parent_names = set()
     if row_names:
@@ -215,6 +240,7 @@ def read_component_return_preview(api, report):
                 "supplier": doc.get("supplier"),
                 "is_return": int(bool(doc.get("is_return"))),
                 "item_code": row.get("item_code"),
+                "subcontracted_item": row.get("subcontracted_item"),
                 "stock_uom": row.get("stock_uom"),
                 "stock_qty": row.get("transfer_qty"),
                 "sco_rm_detail": row.get("sco_rm_detail"),
@@ -226,6 +252,8 @@ def read_component_return_preview(api, report):
         company=sco.get("company"),
         supplier=sco.get("supplier"),
         supplier_warehouse=sco.get("supplier_warehouse"),
+        processor_lot_docstatus=lot.get("docstatus"),
+        processor_lot_settlement_status=lot.get("settlement_status"),
     )
     can_prepare = bool(
         lot.has_permission("write")

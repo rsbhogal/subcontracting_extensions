@@ -281,16 +281,56 @@ function j14_table(headers, rows) {
 
 function j18_component_return_html(row) {
     const draft_links = (row.draft_component_returns || [])
-        .map(draft => j14_link("Stock Entry", draft.name))
+        .map(draft => draft.name
+            ? `<a href="/app/stock-entry/${encodeURIComponent(draft.name)}" target="_blank" rel="noopener noreferrer"
+                style="text-decoration:underline;overflow-wrap:anywhere;color:#795000;font-weight:600">${j14_escape(draft.name)}</a>`
+            : "")
         .filter(Boolean)
         .join(", ");
+    const action = row.component_return_action_available
+        ? `<button type="button" class="btn btn-xs btn-primary" style="margin-top:7px"
+            data-j18-component-return="${j14_escape(encodeURIComponent(row.sco_supplied_item || ""))}"
+            data-j18-expected-qty="${j14_escape(String(row.component_return_expected_qty ?? ""))}">
+            ${j14_escape(__("Prepare full draft return"))}</button>`
+        : "";
     return `<div>${j14_badge(__(row.component_return_label || "Component return preview unavailable"),
             (row.component_return_blockers || []).length ? "red"
-                : row.component_return_code === "READY_TO_PREPARE_COMPONENT_RETURN" ? "amber" : "neutral")}</div>
+                : ["READY_TO_PREPARE_COMPONENT_RETURN", "OPEN_EXISTING_DRAFT_RETURN"].includes(row.component_return_code)
+                    ? "amber" : "neutral")}</div>
         <div class="text-muted" style="margin-top:5px">${j14_escape(__(row.component_return_detail || "No return action is enabled."))}</div>
         <div class="text-muted" style="margin-top:5px">${j14_escape(row.component_return_source_warehouse || "—")} → ${j14_escape(row.component_return_target_warehouse || "—")}</div>
+        <div class="text-muted">${j14_escape(__("Current source stock"))}: ${j14_qty(row.component_return_source_stock_qty)} ${j14_escape(row.stock_uom || "")}</div>
         <div class="text-muted">${j14_escape(__("Draft reserved"))}: ${j14_qty(row.draft_return_reserved_qty)} ${j14_escape(row.stock_uom || "")}; ${j14_escape(__("Available"))}: ${j14_qty(row.return_qty_available_to_prepare)} ${j14_escape(row.stock_uom || "")}</div>
-        ${draft_links ? `<div style="margin-top:5px">${j14_escape(__("Draft Stock Entry"))}: ${draft_links}</div>` : ""}`;
+        ${draft_links ? `<div style="margin-top:5px">${j14_badge(__("Draft Stock Entry"), "amber")} ${draft_links}</div>` : ""}
+        ${action}`;
+}
+
+function j18_bind_component_return_actions(frm, wrapper) {
+    const buttons = wrapper?.find?.("[data-j18-component-return]");
+    buttons?.off?.("click.j18").on?.("click.j18", function () {
+        const button = this;
+        const sco_supplied_item = decodeURIComponent(button.dataset.j18ComponentReturn || "");
+        const expected_qty = button.dataset.j18ExpectedQty;
+        frappe.confirm(
+            __("Prepare an unsubmitted Stock Entry for the full available component quantity?"),
+            async () => {
+                button.disabled = true;
+                try {
+                    const response = await frappe.call({
+                        method: "subcontracting_extensions.material_reconciliation_ui.prepare_component_return",
+                        args: {processor_lot: frm.doc.name, sco_supplied_item, expected_qty},
+                        freeze: true,
+                        freeze_message: __("Preparing draft component return"),
+                    });
+                    if (response.message?.name) {
+                        frappe.set_route("Form", "Stock Entry", response.message.name);
+                    }
+                } finally {
+                    button.disabled = false;
+                }
+            }
+        );
+    });
 }
 
 async function render_j14_material_panel(frm) {
@@ -313,6 +353,7 @@ async function render_j14_material_panel(frm) {
         if (report.processor_lot !== name || report.subcontracting_order !== sco) throw Error("Evidence identity mismatch");
         frm.__j16_material_report = report;
         wrapper.html(build_j14_material_panel(report));
+        j18_bind_component_return_actions(frm, wrapper);
         frm.set_df_property("material_reconciliation_section", "hidden", 0);
         render_j16_operational_guidance(frm);
     } catch (error) {
@@ -407,6 +448,7 @@ function render_j16_operational_guidance(frm) {
             ${j14_escape(__("Show detailed audit evidence"))}
         </label>
     </div>`);
+    j18_bind_component_return_actions(frm, field.$wrapper);
     j16_apply_view(frm, detailed);
     const toggle = field.$wrapper.find?.("[data-j16-detailed]");
     toggle?.off?.("change.j16").on?.("change.j16", function () {

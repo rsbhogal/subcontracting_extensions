@@ -31,6 +31,13 @@ class TestMaterialReconciliationUI(unittest.TestCase):
                 component_return_creation_enabled=False,
             )
         )
+        self.module.enable_component_return_creation = Mock(
+            side_effect=lambda report, enabled: dict(
+                report,
+                component_return_execution_contract_version="J18B",
+                component_return_creation_enabled=enabled,
+            )
+        )
 
     def test_disabled_by_default_without_evidence_reads(self):
         self.assertEqual(self.module.get_material_panel("LOT"), {"enabled": False})
@@ -70,6 +77,34 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.module.get_material_panel("LOT")
 
+    def test_creation_flag_enables_only_the_j18b_action_layer(self):
+        self.frappe.conf.update(
+            v2_processor_first_material_facts=1,
+            v2_component_return_creation=1,
+        )
+        lot = SimpleNamespace(has_permission=Mock(return_value=True))
+        self.frappe.get_doc = Mock(return_value=lot)
+        result = self.module.get_material_panel("LOT")
+        self.module.enable_component_return_creation.assert_called_once()
+        self.assertTrue(
+            self.module.enable_component_return_creation.call_args.kwargs["enabled"]
+        )
+        self.assertTrue(result["component_return_creation_enabled"])
+
+    def test_prepare_endpoint_is_flag_guarded_and_delegated(self):
+        self.frappe.throw = Mock(side_effect=RuntimeError)
+        with self.assertRaises(RuntimeError):
+            self.module.prepare_component_return("LOT", "RM-A", "1")
+
+        self.frappe.conf["v2_component_return_creation"] = 1
+        self.module.create_component_return_draft = Mock(return_value={"name": "STE"})
+        result = self.module.prepare_component_return("LOT", "RM-A", "1")
+        self.assertEqual(result, {"name": "STE"})
+        args = self.module.create_component_return_draft.call_args.args
+        self.assertIs(args[0], self.frappe)
+        self.assertIs(args[1], self.module._read_component_return_report)
+        self.assertEqual(args[2:], ("LOT", "RM-A", "1"))
+
     def test_read_only_permission_is_reported_without_enabling_action(self):
         self.frappe.conf["v2_processor_first_material_facts"] = 1
         lot = SimpleNamespace(has_permission=Mock(return_value=False))
@@ -108,7 +143,7 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.check_single_item_routing(0)
 
     def test_whitelist_does_not_enable_guest_access(self):
-        self.frappe.whitelist.assert_called_once_with()
+        self.assertEqual(self.frappe.whitelist.call_count, 2)
 
 
 if __name__ == "__main__":

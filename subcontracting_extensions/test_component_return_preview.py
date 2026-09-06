@@ -20,6 +20,7 @@ def component(**changes):
         sco_supplied_item="RM-A",
         sco_finished_item="FG-A",
         component_item="Wire",
+        component_return_subcontracted_item="Finished Wire",
         stock_uom="Kg",
         physical_remaining_qty=10,
         unaccounted_remaining_qty=10,
@@ -54,6 +55,7 @@ def draft(**changes):
         supplier="Supplier",
         is_return=1,
         item_code="Wire",
+        subcontracted_item="Finished Wire",
         stock_uom="Kg",
         stock_qty=4,
         sco_rm_detail="RM-A",
@@ -118,6 +120,12 @@ class TestComponentReturnPreview(unittest.TestCase):
         )["components"][0]
         self.assertIn("DRAFT_RETURN_ITEM_UOM_MISMATCH", row["component_return_blockers"])
 
+    def test_wrong_subcontracted_item_draft_blocks(self):
+        row = assess_component_return_preview(
+            report(), [draft(subcontracted_item="Wrong Finished Item")], can_prepare=True
+        )["components"][0]
+        self.assertIn("DRAFT_RETURN_ITEM_UOM_MISMATCH", row["component_return_blockers"])
+
     def test_over_reserved_and_multiple_drafts_fail_closed(self):
         row = assess_component_return_preview(
             report(), [draft(name="A", stock_qty=7), draft(name="B", row_name="B", stock_qty=6)],
@@ -133,6 +141,50 @@ class TestComponentReturnPreview(unittest.TestCase):
         )["components"][0]
         self.assertEqual(row["component_return_code"], "NO_COMPONENT_RETURN_REQUIRED")
         self.assertFalse(row["component_return_prepare_permitted"])
+
+    def test_insufficient_current_source_stock_blocks_preparation(self):
+        row = assess_component_return_preview(
+            report(component(component_return_source_stock_qty=0)), can_prepare=True
+        )["components"][0]
+        self.assertIn(
+            "INSUFFICIENT_COMPONENT_RETURN_SOURCE_STOCK",
+            row["component_return_blockers"],
+        )
+        self.assertEqual(row["component_return_code"], "REVIEW_RETURN_EVIDENCE")
+        self.assertFalse(row["component_return_prepare_permitted"])
+
+    def test_exact_source_stock_allows_preparation(self):
+        row = assess_component_return_preview(
+            report(component(component_return_source_stock_qty=10)), can_prepare=True
+        )["components"][0]
+        self.assertNotIn(
+            "INSUFFICIENT_COMPONENT_RETURN_SOURCE_STOCK",
+            row["component_return_blockers"],
+        )
+        self.assertEqual(row["component_return_code"], "READY_TO_PREPARE_COMPONENT_RETURN")
+
+    def test_completed_processor_lot_never_offers_return(self):
+        source = report(component(component_return_source_stock_qty=10))
+        source.update(
+            processor_lot_docstatus=1,
+            processor_lot_settlement_status="Completed",
+        )
+        row = assess_component_return_preview(source, can_prepare=True)["components"][0]
+        self.assertIn("PROCESSOR_LOT_ALREADY_COMPLETED", row["component_return_blockers"])
+        self.assertEqual(row["component_return_code"], "REVIEW_RETURN_EVIDENCE")
+
+    def test_started_commercial_settlement_never_offers_return(self):
+        source = report(component(component_return_source_stock_qty=10))
+        source.update(
+            processor_lot_docstatus=1,
+            processor_lot_settlement_status="Debit Note Created",
+        )
+        row = assess_component_return_preview(source, can_prepare=True)["components"][0]
+        self.assertIn(
+            "PROCESSOR_LOT_SETTLEMENT_ALREADY_STARTED",
+            row["component_return_blockers"],
+        )
+        self.assertEqual(row["component_return_code"], "REVIEW_RETURN_EVIDENCE")
 
     def test_permission_is_reported_without_enabling_action(self):
         row = assess_component_return_preview(report(), can_prepare=False)["components"][0]
@@ -157,23 +209,25 @@ class TestComponentReturnPreview(unittest.TestCase):
         self.assertEqual(drafts, before_drafts)
 
     def test_reader_discovers_exact_draft_and_native_reserve_warehouse(self):
-        lot = Row(name="LOT", supplied_items=[])
+        lot = Row(name="LOT", docstatus=1, settlement_status="Draft", supplied_items=[])
         lot.check_permission = Mock()
         lot.has_permission = Mock(return_value=True)
-        supplied = Row(name="RM-A", reserve_warehouse="Raw - C")
+        supplied = Row(name="RM-A", reserve_warehouse="Raw - C", main_item_code="Finished Wire")
         sco = Row(name="SCO", company="Company", supplier="Supplier",
             supplier_warehouse="Supplier - C", supplied_items=[supplied])
         sco.check_permission = Mock()
         warehouse = Row(name="Raw - C", company="Company", disabled=0)
         warehouse.check_permission = Mock()
         item = Row(name="SED-A", sco_rm_detail="RM-A", item_code="Wire", stock_uom="Kg",
-            transfer_qty=4, s_warehouse="Supplier - C", t_warehouse="Raw - C")
+            subcontracted_item="Finished Wire", transfer_qty=4,
+            s_warehouse="Supplier - C", t_warehouse="Raw - C")
         stock = Row(name="STE-DRAFT", docstatus=0, subcontracting_order="SCO", company="Company",
             supplier="Supplier", is_return=1, items=[item])
         stock.check_permission = Mock()
         docs = {("Processor Lot", "LOT"): lot, ("Subcontracting Order", "SCO"): sco,
             ("Warehouse", "Raw - C"): warehouse, ("Stock Entry", "STE-DRAFT"): stock}
         api = SimpleNamespace(
+            db=SimpleNamespace(get_value=Mock(return_value=7)),
             get_doc=Mock(side_effect=lambda doctype, name: docs[(doctype, name)]),
             get_all=Mock(return_value=[Row(parent="STE-DRAFT")]),
             has_permission=Mock(return_value=True),
@@ -181,7 +235,14 @@ class TestComponentReturnPreview(unittest.TestCase):
         result = read_component_return_preview(api, report())
         row = result["components"][0]
         self.assertEqual(row["component_return_target_warehouse"], "Raw - C")
+        self.assertEqual(
+            row["component_return_identity"]["subcontracted_item"],
+            "Finished Wire",
+        )
         self.assertEqual(row["draft_return_reserved_qty"], 4)
+        self.assertEqual(row["component_return_source_stock_qty"], 7)
+        self.assertEqual(result["processor_lot_docstatus"], 1)
+        self.assertEqual(result["processor_lot_settlement_status"], "Draft")
         api.get_all.assert_called_once()
         stock.check_permission.assert_called_once_with("read")
 
