@@ -5,6 +5,7 @@ from frappe.utils import cint
 
 from subcontracting_extensions.material_reconciliation_reader import get_material_position
 from subcontracting_extensions.component_action_readiness import assess_component_action_readiness
+from subcontracting_extensions.component_return_preview import read_component_return_preview
 
 
 @frappe.whitelist()
@@ -17,4 +18,5 @@ def get_material_panel(processor_lot):
         report,
         can_write=bool(lot.has_permission("write")),
     )
+    report = read_component_return_preview(frappe, report)
     return dict(report, enabled=True)

@@ -24,6 +24,13 @@ class TestMaterialReconciliationUI(unittest.TestCase):
                 commercial_review_permitted=can_write,
             )
         )
+        self.module.read_component_return_preview = Mock(
+            side_effect=lambda api, report: dict(
+                report,
+                component_return_contract_version="J18A",
+                component_return_creation_enabled=False,
+            )
+        )
 
     def test_disabled_by_default_without_evidence_reads(self):
         self.assertEqual(self.module.get_material_panel("LOT"), {"enabled": False})
@@ -41,10 +48,20 @@ class TestMaterialReconciliationUI(unittest.TestCase):
             self.reader.return_value,
             can_write=True,
         )
+        self.module.read_component_return_preview.assert_called_once()
+        preview_args = self.module.read_component_return_preview.call_args.args
+        self.assertIs(preview_args[0], self.frappe)
+        self.assertEqual(
+            preview_args[1]["component_action_contract_version"],
+            "J17",
+        )
+        self.assertTrue(preview_args[1]["commercial_review_permitted"])
         self.assertTrue(result["enabled"])
         self.assertFalse(result["settlement_enabled"])
         self.assertEqual(result["component_action_contract_version"], "J17")
         self.assertTrue(result["commercial_review_permitted"])
+        self.assertEqual(result["component_return_contract_version"], "J18A")
+        self.assertFalse(result["component_return_creation_enabled"])
         self.assertNotIn("enabled", self.reader.return_value)
 
     def test_permission_error_propagates_without_partial_report(self):

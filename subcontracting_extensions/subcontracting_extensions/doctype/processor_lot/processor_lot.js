@@ -279,6 +279,20 @@ function j14_table(headers, rows) {
             : `<tr><td colspan="${headers.length}">${j14_escape(__("No evidence rows."))}</td></tr>`}</tbody></table></div>`;
 }
 
+function j18_component_return_html(row) {
+    const draft_links = (row.draft_component_returns || [])
+        .map(draft => j14_link("Stock Entry", draft.name))
+        .filter(Boolean)
+        .join(", ");
+    return `<div>${j14_badge(__(row.component_return_label || "Component return preview unavailable"),
+            (row.component_return_blockers || []).length ? "red"
+                : row.component_return_code === "READY_TO_PREPARE_COMPONENT_RETURN" ? "amber" : "neutral")}</div>
+        <div class="text-muted" style="margin-top:5px">${j14_escape(__(row.component_return_detail || "No return action is enabled."))}</div>
+        <div class="text-muted" style="margin-top:5px">${j14_escape(row.component_return_source_warehouse || "—")} → ${j14_escape(row.component_return_target_warehouse || "—")}</div>
+        <div class="text-muted">${j14_escape(__("Draft reserved"))}: ${j14_qty(row.draft_return_reserved_qty)} ${j14_escape(row.stock_uom || "")}; ${j14_escape(__("Available"))}: ${j14_qty(row.return_qty_available_to_prepare)} ${j14_escape(row.stock_uom || "")}</div>
+        ${draft_links ? `<div style="margin-top:5px">${j14_escape(__("Draft Stock Entry"))}: ${draft_links}</div>` : ""}`;
+}
+
 async function render_j14_material_panel(frm) {
     const wrapper = frm.get_field("material_reconciliation_html")?.$wrapper;
     if (!wrapper) return;
@@ -380,13 +394,14 @@ function render_j16_operational_guidance(frm) {
         j14_qty(row.physical_remaining_qty), j14_qty(row.applied_credit_qty), j14_qty(row.unaccounted_remaining_qty),
         j14_badge(__(row.material_next_action_label || "Review component evidence"),
             row.evidence_consistent !== true ? "red" : row.material_settlement_eligible === true ? "green" : "amber"),
+        j18_component_return_html(row),
         `<div>${j14_badge(__(row.commercial_treatment_label || "Commercial treatment not determined"), "neutral")}</div>
             <div class="text-muted" style="margin-top:5px">${j14_escape(__(row.component_action_detail || "No commercial document is authorised."))}</div>`]);
     field.$wrapper.html(`<div style="border:1px solid #8baecb;border-radius:8px;padding:14px;background:#f7fbfe">
         <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("What to do next"))}</div>
         <div>${j14_badge(state.title, state.tone)} ${state.link}</div>
         <div style="margin-top:8px">${j14_escape(state.detail)}</div>
-        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Material Action", "Commercial Treatment"], rows)}
+        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Material Action", "Component Return", "Commercial Treatment"], rows)}
         <label style="display:inline-flex;align-items:center;gap:7px;margin:4px 0 0;cursor:pointer;font-weight:500">
             <input type="checkbox" data-j16-detailed ${detailed ? "checked" : ""}>
             ${j14_escape(__("Show detailed audit evidence"))}
@@ -464,13 +479,14 @@ function build_j14_material_panel(report) {
         <p class="text-muted">${text(__(report.settlement_eligibility_scope || "Material quantities only; no settlement write, receipt completion, commercial approval, or lot closure"))}</p>
         <p class="text-muted">${text(__("Evidence covers the entire SCO. Applied credit accounts for a physical balance; it does not mean the material was consumed or returned."))}</p>`;
     if (codes.length) html += `<p>${text(codes.map(code => __(messages[code] || code)).join("; "))}</p>`;
-    html += j14_table(["Component", "UOM", "Sent", "Consumed", "Returned", "Physical Remaining", "Applied Credit", "Unaccounted Remaining", "Evidence Status", "Next Material Action", "Commercial Treatment"],
+    html += j14_table(["Component", "UOM", "Sent", "Consumed", "Returned", "Physical Remaining", "Applied Credit", "Unaccounted Remaining", "Evidence Status", "Next Material Action", "Component Return", "Commercial Treatment"],
         (report.components || []).map(row => [text(row.component_item), text(row.stock_uom), text(j14_qty(row.supplied_qty)),
             text(j14_qty(row.consumed_qty)), text(j14_qty(row.returned_qty)), text(j14_qty(row.physical_remaining_qty)),
             text(j14_qty(row.applied_credit_qty)), j14_badge(j14_qty(row.unaccounted_remaining_qty),
                 Number(row.unaccounted_remaining_qty) < 0 ? "red" : Number(row.unaccounted_remaining_qty) > 0 ? "amber" : "neutral"), status(row),
             `<div>${j14_badge(__(row.material_next_action_label || "Review component evidence"), action_tone(row))}</div>
                 <div class="text-muted" style="margin-top:5px">${text(__(row.material_next_action_detail || ""))}</div>`,
+            j18_component_return_html(row),
             `<div>${j14_badge(__(row.commercial_treatment_label || "Commercial treatment not determined"), "neutral")}</div>
                 <div class="text-muted" style="margin-top:5px">${text(__(row.component_action_detail || "No commercial document is authorised."))}</div>`]));
     html += `<details style="margin-top:14px"><summary style="cursor:pointer;display:list-item;

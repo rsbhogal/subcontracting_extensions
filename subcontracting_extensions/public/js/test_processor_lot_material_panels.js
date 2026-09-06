@@ -32,12 +32,18 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
         returned_qty: 0, remaining_qty: 0, physical_remaining_qty: 0, applied_credit_qty: 0,
         unaccounted_remaining_qty: 0, material_balanced: true, material_accounted: true, evidence_consistent: true,
         material_settlement_eligible: true, material_next_action_label: "No further material action",
-        material_next_action_detail: "Physically reconciled.", issues: []},
+        material_next_action_detail: "Physically reconciled.", component_return_code: "NO_COMPONENT_RETURN_REQUIRED",
+        component_return_label: "No component return required", component_return_detail: "No positive balance.",
+        component_return_source_warehouse: "Processor", component_return_target_warehouse: "Raw - BPL",
+        draft_return_reserved_qty: 0, return_qty_available_to_prepare: 0, component_return_blockers: [], issues: []},
         {component_item: "Blank", stock_uom: "Units", supplied_qty: 100, consumed_qty: 100,
         returned_qty: 0, remaining_qty: 0, physical_remaining_qty: 0, applied_credit_qty: 0,
         unaccounted_remaining_qty: 0, material_balanced: true, material_accounted: true, evidence_consistent: true,
         material_settlement_eligible: true, material_next_action_label: "No further material action",
-        material_next_action_detail: "Physically reconciled.", issues: []}],
+        material_next_action_detail: "Physically reconciled.", component_return_code: "NO_COMPONENT_RETURN_REQUIRED",
+        component_return_label: "No component return required", component_return_detail: "No positive balance.",
+        component_return_source_warehouse: "Processor", component_return_target_warehouse: "Cutting - BPL",
+        draft_return_reserved_qty: 0, return_qty_available_to_prepare: 0, component_return_blockers: [], issues: []}],
     sources: [{doctype: "Stock Entry", name: 'STE/a?"<>', docstatus: 1}],
     movements: [{parent: "STE", evidence_role: "Physical transfer or return", item_code: "Wire", stock_uom: "Kg", stock_qty: 500,
         s_warehouse: "Factory", t_warehouse: "Processor", sco_rm_detail: "RM"}],
@@ -94,6 +100,19 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     assert(html().includes("/app/subcontracting-receipt/SCR"));
     assert(html().includes("Settlement not enabled"));
     assert(html().includes("Commercial Treatment"));
+    assert(html().includes("Component Return"));
+    assert(html().includes("Processor") && html().includes("Raw - BPL") && html().includes("Cutting - BPL"));
+    assert(html().includes("Draft reserved") && html().includes("Available"));
+    const draft_return_html = context.j18_component_return_html({
+        component_return_label: "Draft component return already exists",
+        component_return_detail: "Review draft.", component_return_source_warehouse: "Processor",
+        component_return_target_warehouse: "Raw - BPL", draft_return_reserved_qty: 2,
+        return_qty_available_to_prepare: 3, stock_uom: "Kg", component_return_blockers: [],
+        component_return_code: "OPEN_EXISTING_DRAFT_RETURN",
+        draft_component_returns: [{name: 'STE/a?"<>'}]
+    });
+    assert(draft_return_html.includes("Draft Stock Entry"));
+    assert(draft_return_html.includes("/app/stock-entry/STE%2Fa%3F%22%3C%3E"));
     assert(html().includes("Commercial treatment not determined"));
     report.material_balanced = false;
     report.issues = ["MATERIAL_BALANCE_REMAINS"];
