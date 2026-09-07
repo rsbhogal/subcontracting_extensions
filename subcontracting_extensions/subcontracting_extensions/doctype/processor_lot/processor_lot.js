@@ -293,6 +293,13 @@ function j18_component_return_html(row) {
             data-j18-expected-qty="${j14_escape(String(row.component_return_expected_qty ?? ""))}">
             ${j14_escape(__("Prepare full draft return"))}</button>`
         : "";
+    const submit_action = row.component_return_submit_action_available
+        ? `<button type="button" class="btn btn-xs btn-primary" style="margin-top:7px;margin-left:5px"
+            data-j18c-component-return="${j14_escape(encodeURIComponent(row.sco_supplied_item || ""))}"
+            data-j18c-stock-entry="${j14_escape(encodeURIComponent(row.component_return_submit_stock_entry || ""))}"
+            data-j18c-expected-qty="${j14_escape(String(row.component_return_submit_expected_qty ?? ""))}">
+            ${j14_escape(__("Submit component return"))}</button>`
+        : "";
     return `<div>${j14_badge(__(row.component_return_label || "Component return preview unavailable"),
             (row.component_return_blockers || []).length ? "red"
                 : ["READY_TO_PREPARE_COMPONENT_RETURN", "OPEN_EXISTING_DRAFT_RETURN"].includes(row.component_return_code)
@@ -302,7 +309,7 @@ function j18_component_return_html(row) {
         <div class="text-muted">${j14_escape(__("Current source stock"))}: ${j14_qty(row.component_return_source_stock_qty)} ${j14_escape(row.stock_uom || "")}</div>
         <div class="text-muted">${j14_escape(__("Draft reserved"))}: ${j14_qty(row.draft_return_reserved_qty)} ${j14_escape(row.stock_uom || "")}; ${j14_escape(__("Available"))}: ${j14_qty(row.return_qty_available_to_prepare)} ${j14_escape(row.stock_uom || "")}</div>
         ${draft_links ? `<div style="margin-top:5px">${j14_badge(__("Draft Stock Entry"), "amber")} ${draft_links}</div>` : ""}
-        ${action}`;
+        ${action}${submit_action}`;
 }
 
 function j18_bind_component_return_actions(frm, wrapper) {
@@ -321,6 +328,32 @@ function j18_bind_component_return_actions(frm, wrapper) {
                         args: {processor_lot: frm.doc.name, sco_supplied_item, expected_qty},
                         freeze: true,
                         freeze_message: __("Preparing draft component return"),
+                    });
+                    if (response.message?.name) {
+                        frappe.set_route("Form", "Stock Entry", response.message.name);
+                    }
+                } finally {
+                    button.disabled = false;
+                }
+            }
+        );
+    });
+    const submit_buttons = wrapper?.find?.("[data-j18c-component-return]");
+    submit_buttons?.off?.("click.j18c").on?.("click.j18c", function () {
+        const button = this;
+        const sco_supplied_item = decodeURIComponent(button.dataset.j18cComponentReturn || "");
+        const stock_entry = decodeURIComponent(button.dataset.j18cStockEntry || "");
+        const expected_qty = button.dataset.j18cExpectedQty;
+        frappe.confirm(
+            __("Submit the selected component-return Stock Entry? This will post the stock movement."),
+            async () => {
+                button.disabled = true;
+                try {
+                    const response = await frappe.call({
+                        method: "subcontracting_extensions.material_reconciliation_ui.submit_component_return",
+                        args: {processor_lot: frm.doc.name, sco_supplied_item, stock_entry, expected_qty},
+                        freeze: true,
+                        freeze_message: __("Submitting component return"),
                     });
                     if (response.message?.name) {
                         frappe.set_route("Form", "Stock Entry", response.message.name);

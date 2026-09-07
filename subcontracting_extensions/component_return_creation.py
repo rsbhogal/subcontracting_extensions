@@ -26,6 +26,48 @@ def set_component_return_posting_datetime(target, settlement_date, source):
     target.posting_time = timedelta(0)
 
 
+def get_component_return_sources(api, sco_supplied_item, identity,
+                                 exclude_stock_entry=None):
+    """Return every exact-row outgoing transfer eligible as ITC-04 source."""
+    detail_rows = api.get_all(
+        "Stock Entry Detail",
+        filters={
+            "sco_rm_detail": sco_supplied_item,
+            "docstatus": 1,
+            "parenttype": "Stock Entry",
+            "parentfield": "items",
+        },
+        fields=["parent", "s_warehouse", "t_warehouse"],
+        limit_page_length=0,
+    )
+    names = sorted({
+        row.parent for row in detail_rows
+        if row.parent
+        and row.parent != exclude_stock_entry
+        and row.s_warehouse
+        and row.s_warehouse != identity["source_warehouse"]
+        and row.t_warehouse == identity["source_warehouse"]
+    })
+    sources = api.get_all(
+        "Stock Entry",
+        filters={"name": ["in", names], "docstatus": 1},
+        fields=["name", "posting_date", "posting_time", "is_return",
+                "subcontracting_order", "company", "supplier"],
+        order_by="posting_date asc, posting_time asc, creation asc, name asc",
+        limit_page_length=0,
+    ) if names else []
+    valid = [source for source in sources if
+             not source.is_return
+             and source.subcontracting_order == identity["subcontracting_order"]
+             and source.company == identity["company"]
+             and source.supplier == identity["supplier"]]
+    if {source.name for source in valid} != set(names):
+        api.throw("Exact-row source Stock Entry identity is inconsistent")
+    if not valid:
+        api.throw("No submitted exact-row Stock Entry source was found")
+    return valid
+
+
 def enable_component_return_creation(report, *, enabled=False):
     """Expose an action only for rows already proven ready by J18A."""
     result = deepcopy(report)
@@ -131,30 +173,17 @@ def create_component_return_draft(api, report_reader, processor_lot,
     })
     stock_entry.set_posting_time = 1
     stock_entry.posting_date = lot.get("settlement_date")
-    source_rows = api.get_all(
-        "Stock Entry Detail",
-        filters={
-            "sco_rm_detail": identity["sco_supplied_item"],
-            "docstatus": 1,
-            "parenttype": "Stock Entry",
-            "parentfield": "items",
-        },
-        fields=["parent"],
-        limit_page_length=0,
+    sources = get_component_return_sources(
+        api, identity["sco_supplied_item"], identity
     )
-    source_names = sorted({row.parent for row in source_rows if row.parent})
-    latest_source = api.get_all(
-        "Stock Entry",
-        filters={"name": ["in", source_names], "docstatus": 1},
-        fields=["posting_date", "posting_time"],
-        order_by="posting_date desc, posting_time desc, creation desc",
-        limit_page_length=1,
-    ) if source_names else []
-    if not latest_source:
-        api.throw("No submitted exact-row Stock Entry source was found")
     set_component_return_posting_datetime(
-        stock_entry, lot.get("settlement_date"), latest_source[0]
+        stock_entry, lot.get("settlement_date"), sources[-1]
     )
+    for source in sources:
+        stock_entry.append("doc_references", {
+            "link_doctype": "Stock Entry",
+            "link_name": source.name,
+        })
     stock_entry.set_stock_entry_type()
     stock_entry.insert()
     return {"status": "created", "doctype": "Stock Entry",

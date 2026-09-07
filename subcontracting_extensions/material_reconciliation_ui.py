@@ -10,6 +10,10 @@ from subcontracting_extensions.component_return_creation import (
     create_component_return_draft,
     enable_component_return_creation,
 )
+from subcontracting_extensions.component_return_submission import (
+    enable_component_return_submission,
+    submit_component_return_draft,
+)
 
 
 @frappe.whitelist()
@@ -26,6 +30,10 @@ def get_material_panel(processor_lot):
     report = enable_component_return_creation(
         report,
         enabled=bool(cint(frappe.conf.get("v2_component_return_creation"))),
+    )
+    report = enable_component_return_submission(
+        report,
+        enabled=bool(cint(frappe.conf.get("v2_component_return_submission"))),
     )
     return dict(report, enabled=True)
 
@@ -48,5 +56,20 @@ def prepare_component_return(processor_lot, sco_supplied_item, expected_qty):
         _read_component_return_report,
         processor_lot,
         sco_supplied_item,
+        expected_qty,
+    )
+
+
+@frappe.whitelist()
+def submit_component_return(processor_lot, sco_supplied_item, stock_entry,
+                            expected_qty):
+    if not cint(frappe.conf.get("v2_component_return_submission")):
+        frappe.throw("Component return submission is not enabled")
+    return submit_component_return_draft(
+        frappe,
+        _read_component_return_report,
+        processor_lot,
+        sco_supplied_item,
+        stock_entry,
         expected_qty,
     )

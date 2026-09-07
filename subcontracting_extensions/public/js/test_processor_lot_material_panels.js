@@ -128,6 +128,22 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     assert(action_html.includes("Prepare full draft return"));
     assert(action_html.includes("RM%2Fa%3F%22%3C%3E"));
     assert(!draft_return_html.includes("Prepare full draft return"));
+    const submit_return_html = context.j18_component_return_html({
+        component_return_label: "Draft component return already exists",
+        component_return_detail: "Review and submit draft.",
+        component_return_source_warehouse: "Processor",
+        component_return_target_warehouse: "Raw - BPL",
+        draft_return_reserved_qty: 2, component_return_source_stock_qty: 5,
+        return_qty_available_to_prepare: 0, stock_uom: "Kg",
+        component_return_blockers: [], component_return_code: "OPEN_EXISTING_DRAFT_RETURN",
+        draft_component_returns: [{name: 'STE/a?"<>'}],
+        component_return_submit_action_available: true,
+        component_return_submit_stock_entry: 'STE/a?"<>',
+        component_return_submit_expected_qty: 2,
+    });
+    assert(submit_return_html.includes("Submit component return"));
+    assert(submit_return_html.includes('data-j18c-stock-entry="STE%2Fa%3F%22%3C%3E"'));
+    assert(!action_html.includes("Submit component return"));
     assert(html().includes("Commercial treatment not determined"));
     report.material_balanced = false;
     report.issues = ["MATERIAL_BALANCE_REMAINS"];

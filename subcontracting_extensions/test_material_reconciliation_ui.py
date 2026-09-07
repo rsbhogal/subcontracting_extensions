@@ -38,6 +38,13 @@ class TestMaterialReconciliationUI(unittest.TestCase):
                 component_return_creation_enabled=enabled,
             )
         )
+        self.module.enable_component_return_submission = Mock(
+            side_effect=lambda report, enabled: dict(
+                report,
+                component_return_submission_contract_version="J18C",
+                component_return_submission_enabled=enabled,
+            )
+        )
 
     def test_disabled_by_default_without_evidence_reads(self):
         self.assertEqual(self.module.get_material_panel("LOT"), {"enabled": False})
@@ -69,6 +76,7 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.assertTrue(result["commercial_review_permitted"])
         self.assertEqual(result["component_return_contract_version"], "J18A")
         self.assertFalse(result["component_return_creation_enabled"])
+        self.assertFalse(result["component_return_submission_enabled"])
         self.assertNotIn("enabled", self.reader.return_value)
 
     def test_permission_error_propagates_without_partial_report(self):
@@ -104,6 +112,20 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.assertIs(args[0], self.frappe)
         self.assertIs(args[1], self.module._read_component_return_report)
         self.assertEqual(args[2:], ("LOT", "RM-A", "1"))
+
+    def test_submission_flag_and_exact_selected_document_are_delegated(self):
+        self.frappe.throw = Mock(side_effect=RuntimeError)
+        with self.assertRaises(RuntimeError):
+            self.module.submit_component_return("LOT", "RM-A", "STE", "1")
+
+        self.frappe.conf["v2_component_return_submission"] = 1
+        self.module.submit_component_return_draft = Mock(return_value={"name": "STE"})
+        result = self.module.submit_component_return("LOT", "RM-A", "STE", "1")
+        self.assertEqual(result, {"name": "STE"})
+        args = self.module.submit_component_return_draft.call_args.args
+        self.assertIs(args[0], self.frappe)
+        self.assertIs(args[1], self.module._read_component_return_report)
+        self.assertEqual(args[2:], ("LOT", "RM-A", "STE", "1"))
 
     def test_read_only_permission_is_reported_without_enabling_action(self):
         self.frappe.conf["v2_processor_first_material_facts"] = 1
@@ -143,7 +165,7 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.check_single_item_routing(0)
 
     def test_whitelist_does_not_enable_guest_access(self):
-        self.assertEqual(self.frappe.whitelist.call_count, 2)
+        self.assertEqual(self.frappe.whitelist.call_count, 3)
 
 
 if __name__ == "__main__":

@@ -42,7 +42,7 @@ def ready_report(**changes):
 
 class FakeStockEntry(Row):
     def __init__(self):
-        super().__init__(name=None, items=[])
+        super().__init__(name=None, items=[], doc_references=[])
         self.posting_date = date(2026, 9, 6)
         self.posting_time = timedelta(hours=13, minutes=52)
         self.set_posting_time = 0
@@ -78,8 +78,12 @@ def api(stock=None, *, create=True, serial=False, batch=False, locked=True,
         has_permission=Mock(return_value=create),
         get_cached_doc=Mock(return_value=Row(has_serial_no=serial, has_batch_no=batch)),
         get_all=Mock(side_effect=lambda doctype, **kwargs: (
-            [Row(parent="STE-SOURCE")] if doctype == "Stock Entry Detail" and exact_source
+            [Row(parent="STE-SOURCE", s_warehouse="Raw - C",
+                 t_warehouse="Supplier - C")]
+                if doctype == "Stock Entry Detail" and exact_source
             else [Row(
+                name="STE-SOURCE", is_return=0, subcontracting_order="SCO",
+                company="Company", supplier="Supplier",
                 posting_date=date(2026, 7, 20),
                 posting_time=timedelta(hours=12, minutes=57),
             )] if doctype == "Stock Entry" and exact_source
@@ -116,6 +120,9 @@ class TestComponentReturnCreation(unittest.TestCase):
         self.assertEqual((item.s_warehouse, item.t_warehouse),
                          ("Supplier - C", "Cutting - C"))
         self.assertEqual(item.subcontracted_item, "Finished Blank")
+        self.assertEqual(stock["doc_references"], [
+            {"link_doctype": "Stock Entry", "link_name": "STE-SOURCE"}
+        ])
         self.assertEqual(stock.posting_date, date(2026, 7, 20))
         self.assertEqual(stock.posting_time, timedelta(hours=12, minutes=57, seconds=1))
         self.assertEqual(stock.set_posting_time, 1)
