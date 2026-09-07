@@ -14,6 +14,11 @@ from subcontracting_extensions.component_return_submission import (
     enable_component_return_submission,
     submit_component_return_draft,
 )
+from subcontracting_extensions.component_return_reversal import (
+    cancel_component_return,
+    enable_component_return_reversal,
+    read_component_return_reversal,
+)
 
 
 @frappe.whitelist()
@@ -35,6 +40,11 @@ def get_material_panel(processor_lot):
         report,
         enabled=bool(cint(frappe.conf.get("v2_component_return_submission"))),
     )
+    report = read_component_return_reversal(frappe, report)
+    report = enable_component_return_reversal(
+        report,
+        enabled=bool(cint(frappe.conf.get("v2_component_return_reversal"))),
+    )
     return dict(report, enabled=True)
 
 
@@ -44,7 +54,8 @@ def _read_component_return_report(processor_lot):
     report = assess_component_action_readiness(
         report, can_write=bool(lot.has_permission("write"))
     )
-    return read_component_return_preview(frappe, report)
+    report = read_component_return_preview(frappe, report)
+    return read_component_return_reversal(frappe, report)
 
 
 @frappe.whitelist()
@@ -66,6 +77,21 @@ def submit_component_return(processor_lot, sco_supplied_item, stock_entry,
     if not cint(frappe.conf.get("v2_component_return_submission")):
         frappe.throw("Component return submission is not enabled")
     return submit_component_return_draft(
+        frappe,
+        _read_component_return_report,
+        processor_lot,
+        sco_supplied_item,
+        stock_entry,
+        expected_qty,
+    )
+
+
+@frappe.whitelist()
+def reverse_component_return(processor_lot, sco_supplied_item, stock_entry,
+                             expected_qty):
+    if not cint(frappe.conf.get("v2_component_return_reversal")):
+        frappe.throw("Component return reversal is not enabled")
+    return cancel_component_return(
         frappe,
         _read_component_return_report,
         processor_lot,

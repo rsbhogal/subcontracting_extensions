@@ -144,6 +144,24 @@ const data = () => ({enabled: true, processor_lot: "LOT", subcontracting_order: 
     assert(submit_return_html.includes("Submit component return"));
     assert(submit_return_html.includes('data-j18c-stock-entry="STE%2Fa%3F%22%3C%3E"'));
     assert(!action_html.includes("Submit component return"));
+    const reverse_return_html = context.j18_component_return_html({
+        component_return_label: "No component return required",
+        component_return_detail: "Submitted return is active.",
+        component_return_source_warehouse: "Processor",
+        component_return_target_warehouse: "Raw - BPL",
+        component_return_source_stock_qty: 0, draft_return_reserved_qty: 0,
+        return_qty_available_to_prepare: 0, stock_uom: "Kg",
+        component_return_blockers: [], component_return_code: "NO_COMPONENT_RETURN_REQUIRED",
+        sco_supplied_item: 'RM/a?"<>' ,
+        submitted_component_returns: [{name: 'STE/a?"<>'}],
+        component_return_reversal_action_available: true,
+        component_return_reversal_stock_entry: 'STE/a?"<>',
+        component_return_reversal_expected_qty: 2,
+    });
+    assert(reverse_return_html.includes("Submitted return"));
+    assert(reverse_return_html.includes("Cancel submitted component return"));
+    assert(reverse_return_html.includes('data-j18d-stock-entry="STE%2Fa%3F%22%3C%3E"'));
+    assert(!submit_return_html.includes("Cancel submitted component return"));
     assert(html().includes("Commercial treatment not determined"));
     report.material_balanced = false;
     report.issues = ["MATERIAL_BALANCE_REMAINS"];

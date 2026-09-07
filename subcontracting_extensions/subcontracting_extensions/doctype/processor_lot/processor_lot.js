@@ -300,6 +300,16 @@ function j18_component_return_html(row) {
             data-j18c-expected-qty="${j14_escape(String(row.component_return_submit_expected_qty ?? ""))}">
             ${j14_escape(__("Submit component return"))}</button>`
         : "";
+    const reverse_action = row.component_return_reversal_action_available
+        ? `<button type="button" class="btn btn-xs btn-danger" style="margin-top:7px;margin-left:5px"
+            data-j18d-component-return="${j14_escape(encodeURIComponent(row.sco_supplied_item || ""))}"
+            data-j18d-stock-entry="${j14_escape(encodeURIComponent(row.component_return_reversal_stock_entry || ""))}"
+            data-j18d-expected-qty="${j14_escape(String(row.component_return_reversal_expected_qty ?? ""))}">
+            ${j14_escape(__("Cancel submitted component return"))}</button>`
+        : "";
+    const submitted_links = (row.submitted_component_returns || [])
+        .map(item => item.name ? j14_link("Stock Entry", item.name) : "")
+        .filter(Boolean).join(", ");
     return `<div>${j14_badge(__(row.component_return_label || "Component return preview unavailable"),
             (row.component_return_blockers || []).length ? "red"
                 : ["READY_TO_PREPARE_COMPONENT_RETURN", "OPEN_EXISTING_DRAFT_RETURN"].includes(row.component_return_code)
@@ -309,7 +319,8 @@ function j18_component_return_html(row) {
         <div class="text-muted">${j14_escape(__("Current source stock"))}: ${j14_qty(row.component_return_source_stock_qty)} ${j14_escape(row.stock_uom || "")}</div>
         <div class="text-muted">${j14_escape(__("Draft reserved"))}: ${j14_qty(row.draft_return_reserved_qty)} ${j14_escape(row.stock_uom || "")}; ${j14_escape(__("Available"))}: ${j14_qty(row.return_qty_available_to_prepare)} ${j14_escape(row.stock_uom || "")}</div>
         ${draft_links ? `<div style="margin-top:5px">${j14_badge(__("Draft Stock Entry"), "amber")} ${draft_links}</div>` : ""}
-        ${action}${submit_action}`;
+        ${submitted_links ? `<div style="margin-top:5px">${j14_badge(__("Submitted return"), "green")} ${submitted_links}</div>` : ""}
+        ${action}${submit_action}${reverse_action}`;
 }
 
 function j18_bind_component_return_actions(frm, wrapper) {
@@ -355,6 +366,33 @@ function j18_bind_component_return_actions(frm, wrapper) {
                         freeze: true,
                         freeze_message: __("Submitting component return"),
                     });
+                    if (response.message?.name) {
+                        frappe.set_route("Form", "Stock Entry", response.message.name);
+                    }
+                } finally {
+                    button.disabled = false;
+                }
+            }
+        );
+    });
+    const reverse_buttons = wrapper?.find?.("[data-j18d-component-return]");
+    reverse_buttons?.off?.("click.j18d").on?.("click.j18d", function () {
+        const button = this;
+        const sco_supplied_item = decodeURIComponent(button.dataset.j18dComponentReturn || "");
+        const stock_entry = decodeURIComponent(button.dataset.j18dStockEntry || "");
+        const expected_qty = button.dataset.j18dExpectedQty;
+        frappe.confirm(
+            __("Cancel the selected submitted component return? Stock will move back to the processor warehouse. Immutable ledger history will remain and valuation reposting may remain pending."),
+            async () => {
+                button.disabled = true;
+                try {
+                    const response = await frappe.call({
+                        method: "subcontracting_extensions.material_reconciliation_ui.reverse_component_return",
+                        args: {processor_lot: frm.doc.name, sco_supplied_item, stock_entry, expected_qty},
+                        freeze: true,
+                        freeze_message: __("Cancelling component return"),
+                    });
+                    await render_j14_material_panel(frm);
                     if (response.message?.name) {
                         frappe.set_route("Form", "Stock Entry", response.message.name);
                     }
