@@ -200,6 +200,18 @@ def get_completion_position(processor_lot):
     sco.check_permission("read")
     if lot.docstatus == 2 or sco.docstatus != 1:
         frappe.throw("Completion evidence requires an active Processor Lot and submitted SCO.")
+    report = read_completion_evidence(lot, sco)
+    report.update(enabled=True, processor_lot=lot.name, subcontracting_order=sco.name)
+    return report
+
+
+def read_completion_evidence(lot, sco):
+    """Build authoritative completion evidence after caller permission checks.
+
+    This internal reader deliberately has no feature-flag or whitelist policy;
+    callers remain responsible for checking access to the lot and SCO first.
+    It performs reads only and retains J11's exact SCR/PR/PI lineage contract.
+    """
     evidence = read_evidence(lot.name, sco)
     allocations, receipts = evidence[:2]
     documents = {}
@@ -229,5 +241,5 @@ def get_completion_position(processor_lot):
         if lineage:
             allocation.update(purchase_order=lineage.purchase_order, purchase_order_item=lineage.purchase_order_item)
     report = build_completion(sco, evidence, documents)
-    report.update(enabled=True, processor_lot=lot.name, subcontracting_order=sco.name)
+    report.update(processor_lot=lot.name, subcontracting_order=sco.name)
     return report
