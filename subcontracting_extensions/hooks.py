@@ -54,6 +54,10 @@ fixtures = [
 					"Purchase Order-custom_column_break_quhan",
 					"Purchase Order-custom_settlement_basis",
 					"Purchase Order-custom_settlement_remarks",
+					"Purchase Order-custom_shortage_settlement_method",
+					"Purchase Order-custom_excess_settlement_method",
+					"Purchase Order-custom_recovery_customer",
+					"Supplier-custom_recovery_customer",
 					"Purchase Order Item-custom_processing_route",
 				],
 			]

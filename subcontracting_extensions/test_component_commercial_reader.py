@@ -78,6 +78,9 @@ class TestComponentCommercialReader(unittest.TestCase):
             custom_recover_processing_charges_on_shortage=1,
             custom_settlement_basis="Company Accepted Quantity",
             items=[Doc(name="PO-A", item_code="SERVICE A", stock_uom="Kg")])
+        self.supplier = self.api.add(
+            "Supplier", "Supplier", custom_recovery_customer=None
+        )
         self.pi = self.api.add("Purchase Invoice", "PI", docstatus=1, is_return=0,
             items=[Doc(name="PI-A", po_detail="PO-A", stock_qty=10, stock_uom="Kg",
                 rate=2.5, net_rate=2.5, net_amount=25)])
@@ -99,6 +102,54 @@ class TestComponentCommercialReader(unittest.TestCase):
             "COMMERCIAL_REVIEW_COMPLETE_NO_RECOVERY")
         self.assertEqual(result["finished_items"][0]["matched_invoice_rows"][0][
             "purchase_invoice_item"], "PI-A")
+
+    def test_safe_method_defaults_are_reported_ready_without_customer(self):
+        result = self.read()
+        policy = result["settlement_policy"]
+        self.assertEqual(policy["shortage_settlement_method"],
+                         "PENDING_INVESTIGATION")
+        self.assertEqual(policy["excess_settlement_method"],
+                         "PENDING_OWNERSHIP_INVESTIGATION")
+        self.assertTrue(policy["shortage_method_enabled"])
+        self.assertTrue(policy["excess_method_enabled"])
+        self.assertFalse(policy["recovery_customer_required"])
+        self.assertTrue(policy["recovery_customer_ready"])
+        self.assertTrue(policy["policy_ready"])
+
+    def test_sales_invoice_requires_exact_enabled_supplier_binding(self):
+        self.supplier["custom_recovery_customer"] = "RECOVERY-CUSTOMER"
+        self.api.add("Customer", "RECOVERY-CUSTOMER", disabled=0)
+        self.po.update(
+            custom_shortage_settlement_method="SALES_INVOICE",
+            custom_recovery_customer="RECOVERY-CUSTOMER",
+        )
+        self.lot.update(
+            shortage_settlement_method="SALES_INVOICE",
+            recovery_customer="RECOVERY-CUSTOMER",
+        )
+        result = self.read()
+        policy = result["settlement_policy"]
+        self.assertTrue(policy["recovery_customer_required"])
+        self.assertTrue(policy["recovery_customer_ready"])
+        self.assertTrue(policy["policy_ready"])
+        self.assertEqual(policy["recovery_customer"], "RECOVERY-CUSTOMER")
+
+    def test_wrong_recovery_customer_fails_policy_readiness(self):
+        self.supplier["custom_recovery_customer"] = "RECOVERY-CUSTOMER"
+        self.api.add("Customer", "WRONG-CUSTOMER", disabled=0)
+        self.po.update(
+            custom_shortage_settlement_method="SALES_INVOICE",
+            custom_recovery_customer="WRONG-CUSTOMER",
+        )
+        self.lot.update(
+            shortage_settlement_method="SALES_INVOICE",
+            recovery_customer="WRONG-CUSTOMER",
+        )
+        result = self.read()
+        self.assertFalse(result["settlement_policy"]["policy_ready"])
+        self.assertIn("RECOVERY_CUSTOMER_NOT_READY", result["policy_issues"])
+        self.assertFalse(result["commercial_document_authorized"])
+        self.assertFalse(result["lot_closure_authorized"])
 
     def test_processing_variance_is_finished_row_scoped(self):
         self.pi["items"][0].update(stock_qty=12, net_amount=30)

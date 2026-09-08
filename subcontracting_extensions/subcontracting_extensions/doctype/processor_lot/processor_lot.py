@@ -33,7 +33,13 @@ import frappe
 from frappe import _
 from frappe.desk.search import validate_and_sanitize_search_inputs
 from frappe.model.document import Document
-from frappe.utils import flt, get_datetime, now_datetime
+from frappe.utils import cint, flt, get_datetime, now_datetime
+
+from subcontracting_extensions.settlement_method_policy import (
+    SettlementMethodPolicyError,
+    get_default_method,
+    get_method_contract,
+)
 
 from subcontracting_extensions.subcontracting_extensions.doctype.processor_lot.fact_engine import (
     apply_processor_lot_settlement_policy,
@@ -345,6 +351,19 @@ class ProcessorLot(Document):
             purchase_order.custom_settlement_remarks
         )
 
+        settings_rows = frappe.get_single(
+            "Subcontracting Settlement Settings"
+        ).get("allowed_settlement_methods") or []
+        self.shortage_settlement_method = (
+            purchase_order.get("custom_shortage_settlement_method")
+            or get_default_method(settings_rows, "Shortage")["method_code"]
+        )
+        self.excess_settlement_method = (
+            purchase_order.get("custom_excess_settlement_method")
+            or get_default_method(settings_rows, "Excess")["method_code"]
+        )
+        self.recovery_customer = purchase_order.get("custom_recovery_customer")
+
         self.settlement_policy_source = "Purchase Order"
 
     def _refresh_settlement_action(self) -> None:
@@ -511,6 +530,7 @@ class ProcessorLot(Document):
         itself is submitted.
         """
         self._validate_settlement_policy_override()
+        self._validate_commercial_settlement_policy()
         self._refresh_settlement_action()
         self._validate_header()
         self._refresh_settlement_values()
@@ -536,6 +556,9 @@ class ProcessorLot(Document):
             "recover_processing_charges_on_shortage",
             "settlement_basis",
             "settlement_remarks",
+            "shortage_settlement_method",
+            "excess_settlement_method",
+            "recovery_customer",
         )
 
         audit_fields = (
@@ -551,8 +574,14 @@ class ProcessorLot(Document):
             or "System Manager" in frappe.get_roles()
         )
 
+        settings = frappe.get_single("Subcontracting Settlement Settings")
+
         # A newly inherited Processor Lot requires no override handling.
         if not previous_doc:
+            if self.override_settlement_policy and not settings.get(
+                "allow_processor_lot_policy_override"
+            ):
+                frappe.throw(_("Processor Lot policy override is disabled in Subcontracting Settlement Settings."))
             if not self.override_settlement_policy:
                 self.settlement_policy_source = "Purchase Order"
                 self.settlement_policy_override_reason = None
@@ -625,6 +654,9 @@ class ProcessorLot(Document):
         if not override_related_change:
             return
 
+        if not settings.get("allow_processor_lot_policy_override"):
+            frappe.throw(_("Processor Lot policy override is disabled in Subcontracting Settlement Settings."))
+
         if not is_system_manager:
             frappe.throw(
                 _(
@@ -693,6 +725,38 @@ class ProcessorLot(Document):
             self.settlement_policy_override_reason = None
             self.overridden_by = None
             self.settlement_policy_overridden_on = None
+
+    def _validate_commercial_settlement_policy(self) -> None:
+        """Validate effective methods and the authoritative Supplier binding."""
+        settings_rows = frappe.get_single(
+            "Subcontracting Settlement Settings"
+        ).get("allowed_settlement_methods") or []
+        try:
+            shortage = get_method_contract(
+                settings_rows, self.shortage_settlement_method, "Shortage"
+            )
+            get_method_contract(
+                settings_rows, self.excess_settlement_method, "Excess"
+            )
+        except SettlementMethodPolicyError as error:
+            frappe.throw(_(str(error)), title=_("Invalid Settlement Method"))
+
+        bound_customer = frappe.db.get_value(
+            "Supplier", self.supplier, "custom_recovery_customer"
+        ) if self.supplier else None
+        if self.recovery_customer and self.recovery_customer != bound_customer:
+            frappe.throw(
+                _("Recovery Customer must match the authoritative Customer bound to Supplier {0}.").format(
+                    frappe.bold(self.supplier)
+                ),
+                title=_("Recovery Customer Mismatch"),
+            )
+        if shortage["requires_customer"] and not self.recovery_customer:
+            frappe.throw(_("Recovery Customer is required for Sales Invoice settlement treatment."))
+        if self.recovery_customer:
+            disabled = frappe.db.get_value("Customer", self.recovery_customer, "disabled")
+            if disabled is None or cint(disabled):
+                frappe.throw(_("Recovery Customer must be an existing enabled Customer."))
 
     # ---------------------------------------------------------------------
     # Validation and recalculation
@@ -2703,6 +2767,18 @@ def get_sco_settlement_details(
             else None
         ),
         "settlement_policy_source": "Purchase Order",
+        "shortage_settlement_method": (
+            getattr(purchase_order, "custom_shortage_settlement_method", None)
+            if purchase_order else None
+        ),
+        "excess_settlement_method": (
+            getattr(purchase_order, "custom_excess_settlement_method", None)
+            if purchase_order else None
+        ),
+        "recovery_customer": (
+            getattr(purchase_order, "custom_recovery_customer", None)
+            if purchase_order else None
+        ),
         "items": items,
     }
 

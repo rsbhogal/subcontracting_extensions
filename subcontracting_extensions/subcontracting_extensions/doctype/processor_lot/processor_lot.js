@@ -482,6 +482,11 @@ function j19_decision_label(code) {
         PROCESSOR_LOT_POLICY_DIFFERS_FROM_PURCHASE_ORDER: "Processor Lot policy differs from Purchase Order",
         PROCESSOR_LOT_SETTLEMENT_BASIS_DIFFERS_FROM_PURCHASE_ORDER: "Processor Lot settlement basis differs from Purchase Order",
         SETTLEMENT_POLICY_OVERRIDE_EVIDENCE_INCOMPLETE: "Settlement policy override evidence is incomplete",
+        SHORTAGE_SETTLEMENT_METHOD_NOT_READY: "Shortage settlement method is not ready",
+        EXCESS_SETTLEMENT_METHOD_NOT_READY: "Excess settlement method is not ready",
+        RECOVERY_CUSTOMER_NOT_READY: "Recovery Customer is required or invalid",
+        RECOVERY_CUSTOMER_COUNTERPARTY_MISMATCH: "Recovery Customer does not match the Supplier binding",
+        PROCESSOR_LOT_COMMERCIAL_POLICY_DIFFERS_FROM_PURCHASE_ORDER: "Processor Lot commercial policy differs from Purchase Order",
         DUPLICATE_COMPONENT_IDENTITY: "Duplicate component identity",
         DUPLICATE_FINISHED_ITEM_IDENTITY: "Duplicate finished-item identity",
     };
@@ -519,12 +524,26 @@ function build_j19_commercial_panel(report) {
     ]);
     const policy = (report.policy_issues || []).map(code =>
         `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
+    const policy_details = report.settlement_policy || {};
+    const readiness_tone = policy_details.policy_ready ? "green" : "amber";
+    const policy_readiness = `
+        <div style="margin:10px 0">
+            ${j14_badge(policy_details.policy_ready ? __("Policy ready") : __("Policy requires review"), readiness_tone)}
+            ${j14_table(["Policy Source", "Shortage Method", "Excess Method", "Recovery Customer", "Counterparty"], [[
+                j14_escape(policy_details.policy_source || "—"),
+                j14_escape(policy_details.shortage_settlement_method_label || policy_details.shortage_settlement_method || "—"),
+                j14_escape(policy_details.excess_settlement_method_label || policy_details.excess_settlement_method || "—"),
+                j14_escape(policy_details.recovery_customer || "—"),
+                j14_escape(policy_details.recovery_customer_ready ? __("Ready") : __("Requires review")),
+            ]])}
+        </div>`;
     const legacy = (report.legacy_evidence || []).map(row =>
         `<li>${j14_link(row.doctype, row.name)} — ${j14_escape(__(row.reason || "Legacy evidence"))}</li>`).join("");
     return `<div data-j19-commercial-preview style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
         <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("Component commercial preview"))}</div>
         <div style="margin-bottom:8px">${j19_decision_html(report.commercial_decision_code, report.commercial_review_permitted)}</div>
         <p class="text-muted">${j14_escape(__("Read-only preview. No commercial document or lot closure is authorised."))}</p>
+        ${policy_readiness}
         ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Decision", "Invoice Evidence"], finished_rows)}
         ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Decision"], component_rows)}
         ${policy ? `<div>${j14_badge(__("Settlement policy requires review"), "amber")}<ul>${policy}</ul></div>` : ""}
@@ -1290,6 +1309,16 @@ function load_sco_details(frm) {
             );
 
             frm.set_value(
+                "shortage_settlement_method",
+                data.shortage_settlement_method
+            );
+            frm.set_value(
+                "excess_settlement_method",
+                data.excess_settlement_method
+            );
+            frm.set_value("recovery_customer", data.recovery_customer);
+
+            frm.set_value(
                 "settlement_remarks",
                 data.settlement_remarks
             );
@@ -1344,6 +1373,9 @@ function clear_sco_details(frm) {
     );
 
     frm.set_value("settlement_basis", null);
+    frm.set_value("shortage_settlement_method", null);
+    frm.set_value("excess_settlement_method", null);
+    frm.set_value("recovery_customer", null);
     frm.set_value(
         "settlement_policy_source",
         null
@@ -1506,6 +1538,9 @@ function apply_settlement_policy_override_properties(frm) {
         "recover_raw_material_shortage",
         "recover_processing_charges_on_shortage",
         "settlement_basis",
+        "shortage_settlement_method",
+        "excess_settlement_method",
+        "recovery_customer",
         "settlement_remarks"
     ].forEach(fieldname => {
         frm.set_df_property(
@@ -1547,6 +1582,9 @@ function apply_settlement_policy_override_properties(frm) {
         "recover_raw_material_shortage",
         "recover_processing_charges_on_shortage",
         "settlement_basis",
+        "shortage_settlement_method",
+        "excess_settlement_method",
+        "recovery_customer",
         "settlement_remarks",
         "settlement_policy_override_reason",
         "settlement_policy_source",

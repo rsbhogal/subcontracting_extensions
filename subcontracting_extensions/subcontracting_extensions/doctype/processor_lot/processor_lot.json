@@ -18,8 +18,11 @@
   "recover_raw_material_shortage",
   "recover_processing_charges_on_shortage",
   "settlement_basis",
+  "shortage_settlement_method",
+  "excess_settlement_method",
   "settlement_policy_source",
   "column_break_redo",
+  "recovery_customer",
   "settlement_remarks",
   "settlement_policy_override_section",
   "override_settlement_policy",
@@ -362,6 +365,29 @@
    "fieldname": "settlement_remarks",
    "fieldtype": "Small Text",
    "label": "Settlement Remarks",
+   "read_only": 1
+  },
+  {
+   "default": "PENDING_INVESTIGATION",
+   "fieldname": "shortage_settlement_method",
+   "fieldtype": "Select",
+   "label": "Shortage Settlement Method",
+   "options": "\nPURCHASE_DEBIT_NOTE\nSALES_INVOICE\nSUPPLIER_CREDIT_NOTE\nCOMPONENT_RETURN\nCOMMERCIAL_WAIVER\nPENDING_INVESTIGATION",
+   "read_only": 1
+  },
+  {
+   "default": "PENDING_OWNERSHIP_INVESTIGATION",
+   "fieldname": "excess_settlement_method",
+   "fieldtype": "Select",
+   "label": "Excess Settlement Method",
+   "options": "\nCARRY_FORWARD_TO_LOT\nREALLOCATE_COMPANY_MATERIAL\nSUPPLEMENTARY_SUBCONTRACTED_PO\nPURCHASE_SUPPLIER_OWNED_EXCESS\nACCEPT_WITHOUT_ADDITIONAL_CHARGE\nRETURN_OR_REJECT_EXCESS\nPENDING_OWNERSHIP_INVESTIGATION",
+   "read_only": 1
+  },
+  {
+   "fieldname": "recovery_customer",
+   "fieldtype": "Link",
+   "label": "Recovery Customer",
+   "options": "Customer",
    "read_only": 1
   },
   {

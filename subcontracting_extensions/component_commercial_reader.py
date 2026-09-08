@@ -8,6 +8,12 @@ from subcontracting_extensions.component_commercial_preview import (
 from subcontracting_extensions.material_reconciliation_reader import (
     get_material_position,
 )
+from subcontracting_extensions.settlement_method_policy import (
+    SettlementMethodPolicyError,
+    get_default_method,
+    get_method_contract,
+    initial_method_rows,
+)
 
 
 READER_VERSION = "J19A2"
@@ -60,7 +66,7 @@ def _read_component_commercial_preview(
     else:
         completion = completion_position
     finished_rows, invoice_rows = _normalize_finished_rows(api, sco, po, completion)
-    policy, policy_issues = _read_policy(lot, po)
+    policy, policy_issues = _read_policy(api, lot, po, sco)
     legacy_evidence = _read_legacy_evidence(api, lot, sco)
     _merge_material_settlement_evidence(
         legacy_evidence,
@@ -152,7 +158,13 @@ def _normalize_finished_rows(api, sco, po, completion):
     return finished_rows, invoice_rows
 
 
-def _read_policy(lot, po):
+def _read_policy(api, lot, po, sco):
+    rows = (
+        api.get_single("Subcontracting Settlement Settings").get(
+            "allowed_settlement_methods"
+        )
+        if hasattr(api, "get_single") else initial_method_rows()
+    ) or []
     override = bool(lot.get("override_settlement_policy"))
     if override:
         if not all((lot.get("overridden_by"), lot.get("settlement_policy_overridden_on"),
@@ -160,14 +172,16 @@ def _read_policy(lot, po):
             issues = ["SETTLEMENT_POLICY_OVERRIDE_EVIDENCE_INCOMPLETE"]
         else:
             issues = []
-        return {
+        policy = {
             "policy_source": "Processor Lot Override",
             "recover_raw_material_shortage": bool(lot.get("recover_raw_material_shortage")),
             "recover_processing_charges_on_shortage": bool(
                 lot.get("recover_processing_charges_on_shortage")
             ),
             "settlement_basis": lot.get("settlement_basis"),
-        }, issues
+        }
+        policy.update(_read_method_readiness(api, rows, lot, sco, issues))
+        return policy, issues
     expected = {
         "recover_raw_material_shortage": bool(po.get("custom_recover_raw_material_shortage")),
         "recover_processing_charges_on_shortage": bool(
@@ -185,7 +199,75 @@ def _read_policy(lot, po):
     lot_basis = lot.get("settlement_basis")
     if lot_basis not in (None, "", expected["settlement_basis"]):
         issues.append("PROCESSOR_LOT_SETTLEMENT_BASIS_DIFFERS_FROM_PURCHASE_ORDER")
-    return dict(policy_source="Purchase Order", **expected), issues
+    for lot_field, po_field in (
+        ("shortage_settlement_method", "custom_shortage_settlement_method"),
+        ("excess_settlement_method", "custom_excess_settlement_method"),
+        ("recovery_customer", "custom_recovery_customer"),
+    ):
+        lot_value = lot.get(lot_field)
+        po_value = po.get(po_field)
+        if lot_value not in (None, "") and po_value not in (None, "") and lot_value != po_value:
+            issues.append("PROCESSOR_LOT_COMMERCIAL_POLICY_DIFFERS_FROM_PURCHASE_ORDER")
+            break
+    policy = dict(policy_source="Purchase Order", **expected)
+    policy.update(_read_method_readiness(api, rows, po, sco, issues, po_source=True))
+    return policy, issues
+
+
+def _read_method_readiness(api, rows, source, sco, issues, po_source=False):
+    prefix = "custom_" if po_source else ""
+    shortage_code = source.get(prefix + "shortage_settlement_method")
+    excess_code = source.get(prefix + "excess_settlement_method")
+    recovery_customer = source.get(prefix + "recovery_customer")
+    try:
+        shortage_code = shortage_code or get_default_method(
+            rows, "Shortage"
+        )["method_code"]
+        shortage = get_method_contract(rows, shortage_code, "Shortage")
+    except SettlementMethodPolicyError:
+        shortage = None
+        issues.append("SHORTAGE_SETTLEMENT_METHOD_NOT_READY")
+    try:
+        excess_code = excess_code or get_default_method(
+            rows, "Excess"
+        )["method_code"]
+        excess = get_method_contract(rows, excess_code, "Excess")
+    except SettlementMethodPolicyError:
+        excess = None
+        issues.append("EXCESS_SETTLEMENT_METHOD_NOT_READY")
+
+    customer_required = bool(shortage and shortage.get("requires_customer"))
+    customer_ready = not customer_required
+    bound_customer = None
+    try:
+        supplier = api.get_doc("Supplier", sco.get("supplier"))
+        bound_customer = supplier.get("custom_recovery_customer")
+    except (KeyError, TypeError):
+        pass
+    if recovery_customer:
+        customer_ready = recovery_customer == bound_customer
+        try:
+            customer = api.get_doc("Customer", recovery_customer)
+            customer_ready = customer_ready and not bool(customer.get("disabled"))
+        except (KeyError, TypeError):
+            customer_ready = False
+    if customer_required and not customer_ready:
+        issues.append("RECOVERY_CUSTOMER_NOT_READY")
+    elif recovery_customer and not customer_ready:
+        issues.append("RECOVERY_CUSTOMER_COUNTERPARTY_MISMATCH")
+
+    return {
+        "shortage_settlement_method": shortage_code,
+        "shortage_settlement_method_label": shortage and shortage.get("method_label"),
+        "shortage_method_enabled": bool(shortage),
+        "excess_settlement_method": excess_code,
+        "excess_settlement_method_label": excess and excess.get("method_label"),
+        "excess_method_enabled": bool(excess),
+        "recovery_customer": recovery_customer,
+        "recovery_customer_required": customer_required,
+        "recovery_customer_ready": customer_ready,
+        "policy_ready": not issues,
+    }
 
 
 def _read_legacy_evidence(api, lot, sco):

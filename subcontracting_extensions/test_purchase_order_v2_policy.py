@@ -76,7 +76,11 @@ class TestPurchaseOrderV2Policy(unittest.TestCase):
                 return routes[name]
             return frappe._dict(company="COMPANY", is_group=0, disabled=0)
         self.doc.company = "COMPANY"
-        with patch.object(purchase_order.frappe.db, "get_value", side_effect=lookup) as read:
+        with patch.object(
+            purchase_order.frappe.db, "get_value", side_effect=lookup
+        ) as read, patch.object(
+            purchase_order, "validate_commercial_settlement_defaults"
+        ):
             purchase_order.validate(self.doc)
         self.assertEqual(read.call_count, 4)
         self.assertEqual([row.warehouse for row in self.rows], ["TARGET-A", "TARGET-B"])

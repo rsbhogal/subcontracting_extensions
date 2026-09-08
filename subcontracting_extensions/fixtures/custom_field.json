@@ -682,5 +682,56 @@
     "translatable": 0,
     "unique": 0,
     "width": null
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Supplier",
+    "fieldname": "custom_recovery_customer",
+    "fieldtype": "Link",
+    "insert_after": "supplier_details",
+    "label": "Recovery Customer (Subcontracting)",
+    "module": "Subcontracting Extensions",
+    "name": "Supplier-custom_recovery_customer",
+    "options": "Customer",
+    "description": "Authoritative Customer representing this supplier for controlled subcontracting Sales Invoice recovery."
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Purchase Order",
+    "fieldname": "custom_shortage_settlement_method",
+    "fieldtype": "Select",
+    "insert_after": "custom_settlement_remarks",
+    "label": "Shortage Settlement Method",
+    "module": "Subcontracting Extensions",
+    "name": "Purchase Order-custom_shortage_settlement_method",
+    "default": "PENDING_INVESTIGATION",
+    "options": "\nPURCHASE_DEBIT_NOTE\nSALES_INVOICE\nSUPPLIER_CREDIT_NOTE\nCOMPONENT_RETURN\nCOMMERCIAL_WAIVER\nPENDING_INVESTIGATION",
+    "depends_on": "eval:doc.is_subcontracted == 1"
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Purchase Order",
+    "fieldname": "custom_excess_settlement_method",
+    "fieldtype": "Select",
+    "insert_after": "custom_shortage_settlement_method",
+    "label": "Excess Settlement Method",
+    "module": "Subcontracting Extensions",
+    "name": "Purchase Order-custom_excess_settlement_method",
+    "default": "PENDING_OWNERSHIP_INVESTIGATION",
+    "options": "\nCARRY_FORWARD_TO_LOT\nREALLOCATE_COMPANY_MATERIAL\nSUPPLEMENTARY_SUBCONTRACTED_PO\nPURCHASE_SUPPLIER_OWNED_EXCESS\nACCEPT_WITHOUT_ADDITIONAL_CHARGE\nRETURN_OR_REJECT_EXCESS\nPENDING_OWNERSHIP_INVESTIGATION",
+    "depends_on": "eval:doc.is_subcontracted == 1"
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Purchase Order",
+    "fieldname": "custom_recovery_customer",
+    "fieldtype": "Link",
+    "insert_after": "custom_excess_settlement_method",
+    "label": "Recovery Customer",
+    "module": "Subcontracting Extensions",
+    "name": "Purchase Order-custom_recovery_customer",
+    "options": "Customer",
+    "depends_on": "eval:doc.is_subcontracted == 1",
+    "description": "Inherited from the Supplier master and required for Sales Invoice settlement treatment."
   }
 ]

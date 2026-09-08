@@ -16,6 +16,12 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
+from subcontracting_extensions.settlement_method_policy import (
+    SettlementMethodPolicyError,
+    get_default_method,
+    get_method_contract,
+)
+
 
 def validate(doc, method=None):
     """
@@ -26,6 +32,78 @@ def validate(doc, method=None):
     """
     validate_subcontracted_purchase_order_item_count(doc)
     validate_subcontracting_routes(doc)
+    validate_commercial_settlement_defaults(doc)
+
+
+def _settlement_method_rows():
+    return frappe.get_single("Subcontracting Settlement Settings").get(
+        "allowed_settlement_methods"
+    ) or []
+
+
+def _value(doc, fieldname):
+    return doc.get(fieldname) if hasattr(doc, "get") else getattr(doc, fieldname, None)
+
+
+def validate_commercial_settlement_defaults(
+    doc,
+    *,
+    method_rows=None,
+    db_get_value=None,
+    throw=None,
+):
+    """Default and validate J19B1B policy without authorizing execution."""
+    if not doc.is_subcontracted:
+        return
+    rows = _settlement_method_rows() if method_rows is None else method_rows
+    read_value = db_get_value or frappe.db.get_value
+    reject = throw or frappe.throw
+    try:
+        if not _value(doc, "custom_shortage_settlement_method"):
+            doc.custom_shortage_settlement_method = get_default_method(
+                rows, "Shortage"
+            )["method_code"]
+        if not _value(doc, "custom_excess_settlement_method"):
+            doc.custom_excess_settlement_method = get_default_method(
+                rows, "Excess"
+            )["method_code"]
+        shortage = get_method_contract(
+            rows, doc.custom_shortage_settlement_method, "Shortage"
+        )
+        get_method_contract(rows, doc.custom_excess_settlement_method, "Excess")
+    except SettlementMethodPolicyError as error:
+        reject(_(str(error)), title=_("Invalid Settlement Method"))
+
+    bound_customer = (
+        read_value("Supplier", doc.supplier, "custom_recovery_customer")
+        if doc.supplier else None
+    )
+    selected_customer = _value(doc, "custom_recovery_customer")
+    if not selected_customer and bound_customer:
+        doc.custom_recovery_customer = bound_customer
+        selected_customer = bound_customer
+    if selected_customer and selected_customer != bound_customer:
+        reject(
+            _("Recovery Customer must match the authoritative Customer bound to Supplier {0}.").format(
+                frappe.bold(doc.supplier)
+            ),
+            title=_("Recovery Customer Mismatch"),
+        )
+    if shortage["requires_customer"] and not selected_customer:
+        reject(
+            _("Recovery Customer is required for Sales Invoice settlement treatment."),
+            title=_("Recovery Customer Required"),
+        )
+    if selected_customer:
+        disabled = read_value("Customer", selected_customer, "disabled")
+        if disabled is None:
+            reject(_("Recovery Customer {0} does not exist.").format(
+                frappe.bold(selected_customer)
+            ))
+        if cint(disabled):
+            reject(_("Recovery Customer {0} is disabled.").format(
+                frappe.bold(selected_customer)
+            ))
 
 def validate_subcontracting_routes(doc):
     """

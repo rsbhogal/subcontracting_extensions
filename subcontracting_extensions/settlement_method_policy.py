@@ -177,6 +177,36 @@ def enabled_methods(rows, direction=None):
             if row["enabled"] and (not direction or row["variance_direction"] == direction)]
 
 
+def get_method_contract(rows, method_code, direction=None, *, require_enabled=True):
+    """Return one validated configured method contract."""
+    configured = {row["method_code"]: row for row in normalize_method_rows(rows)}
+    method = configured.get(method_code)
+    if not method:
+        raise SettlementMethodPolicyError(
+            f"Unknown subcontracting settlement method: {method_code or '(blank)'}"
+        )
+    if direction and method["variance_direction"] != direction:
+        raise SettlementMethodPolicyError(
+            f"Settlement method {method_code} is not valid for {direction} settlement"
+        )
+    if require_enabled and not method["enabled"]:
+        raise SettlementMethodPolicyError(
+            f"Subcontracting settlement method is disabled: {method_code}"
+        )
+    return deepcopy(method)
+
+
+def get_default_method(rows, direction):
+    """Return the single enabled default contract for a variance direction."""
+    defaults = [row for row in normalize_method_rows(rows)
+                if row["variance_direction"] == direction and row["is_default"]]
+    if len(defaults) != 1 or not defaults[0]["enabled"]:
+        raise SettlementMethodPolicyError(
+            f"Exactly one enabled default is required for {direction} settlement"
+        )
+    return deepcopy(defaults[0])
+
+
 def _normalized_row(method, supplied, missing=False):
     enabled = False if missing else _flag(
         supplied.get("enabled", method.get("initially_enabled", False))

@@ -8,6 +8,8 @@ from subcontracting_extensions.settlement_method_policy import (
     METHODS,
     SettlementMethodPolicyError,
     enabled_methods,
+    get_default_method,
+    get_method_contract,
     initial_method_rows,
     normalize_method_rows,
 )
@@ -105,6 +107,27 @@ class TestSettlementMethodPolicy(unittest.TestCase):
         self.assertTrue(all(row["variance_direction"] == "Shortage" for row in shortage))
         shortage[0]["enabled"] = False
         self.assertTrue(rows[0]["enabled"])
+
+    def test_method_contract_enforces_direction_and_enabled_state(self):
+        rows = initial_method_rows()
+        self.assertEqual(
+            get_method_contract(rows, "SALES_INVOICE", "Shortage")["method_label"],
+            "Sales Invoice",
+        )
+        with self.assertRaisesRegex(SettlementMethodPolicyError, "not valid for Excess"):
+            get_method_contract(rows, "SALES_INVOICE", "Excess")
+        with self.assertRaisesRegex(SettlementMethodPolicyError, "disabled"):
+            get_method_contract(rows, "COMMERCIAL_WAIVER", "Shortage")
+
+    def test_direction_defaults_are_returned_as_detached_contracts(self):
+        rows = initial_method_rows()
+        shortage = get_default_method(rows, "Shortage")
+        excess = get_default_method(rows, "Excess")
+        self.assertEqual(shortage["method_code"], "PENDING_INVESTIGATION")
+        self.assertEqual(excess["method_code"], "PENDING_OWNERSHIP_INVESTIGATION")
+        shortage["enabled"] = False
+        self.assertTrue(next(row for row in rows
+            if row["method_code"] == "PENDING_INVESTIGATION")["enabled"])
 
 
 if __name__ == "__main__":

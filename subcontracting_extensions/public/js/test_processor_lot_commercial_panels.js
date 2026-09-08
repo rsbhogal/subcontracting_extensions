@@ -51,6 +51,12 @@ function commercial() {
         commercial_decision_code: "COMMERCIAL_REVIEW_COMPLETE_NO_RECOVERY",
         commercial_review_permitted: true, commercial_document_authorized: false,
         commercial_document_creation_enabled: false, lot_closure_authorized: false, policy_issues: [],
+        settlement_policy: {policy_source: "Purchase Order", policy_ready: true,
+            shortage_settlement_method: "PENDING_INVESTIGATION",
+            shortage_settlement_method_label: "Pending Investigation",
+            excess_settlement_method: "PENDING_OWNERSHIP_INVESTIGATION",
+            excess_settlement_method_label: "Pending Ownership Investigation",
+            recovery_customer: "Shiv <unsafe>", recovery_customer_ready: true},
         components: [
             {sco_supplied_item: "RM-KG", component_item: "Wire <unsafe>", stock_uom: "Kg",
                 physical_remaining_qty: 0, applied_credit_qty: 0, unaccounted_remaining_qty: 0,
@@ -75,6 +81,9 @@ function commercial() {
     let html = context.build_j19_commercial_panel(report);
     assert(html.includes("Component commercial preview"));
     assert(html.includes("Read-only preview. No commercial document or lot closure is authorised."));
+    assert(html.includes("Policy ready") && html.includes("Pending Investigation"));
+    assert(html.includes("Pending Ownership Investigation"));
+    assert(html.includes("Shiv &lt;unsafe&gt;") && !html.includes("Shiv <unsafe>"));
     assert(html.includes("500.000") && html.includes("100.000") && !html.includes("600.000"));
     assert(html.includes("Drawn &lt;unsafe&gt;") && !html.includes("Drawn <unsafe>"));
     assert(html.includes("/app/purchase-invoice/PI%2Fa%3F%22%3C%3E"));
