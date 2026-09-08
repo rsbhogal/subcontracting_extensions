@@ -11,6 +11,8 @@ const context = {__: s => s, localStorage: {getItem: key => storage.get(key) || 
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.resolve(__dirname,
     "../../subcontracting_extensions/doctype/processor_lot/processor_lot.js"), "utf8"), context);
+// J19A3 has its own async contract suite; keep this earlier suite scoped to J14-J18.
+context.load_j19_commercial_preview = async () => {};
 function form() {
     const fields = new Map();
     const get = key => {

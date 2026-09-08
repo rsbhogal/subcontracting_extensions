@@ -58,6 +58,10 @@ class TestMaterialReconciliationUI(unittest.TestCase):
                 component_return_reversal_enabled=enabled,
             )
         )
+        self.module.get_component_commercial_preview = Mock(return_value={
+            "commercial_reader_version": "J19A2",
+            "commercial_document_authorized": False,
+        })
 
     def test_disabled_by_default_without_evidence_reads(self):
         self.assertEqual(self.module.get_material_panel("LOT"), {"enabled": False})
@@ -162,6 +166,17 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         result = self.module.get_material_panel("LOT")
         self.assertFalse(result["commercial_review_permitted"])
 
+    def test_commercial_preview_disabled_without_reader_call(self):
+        self.assertEqual(self.module.get_commercial_preview_panel("LOT"), {"enabled": False})
+        self.module.get_component_commercial_preview.assert_not_called()
+
+    def test_commercial_preview_enabled_delegates_to_read_only_reader(self):
+        self.frappe.conf["v2_component_commercial_preview"] = 1
+        result = self.module.get_commercial_preview_panel("LOT")
+        self.module.get_component_commercial_preview.assert_called_once_with("LOT")
+        self.assertTrue(result["enabled"])
+        self.assertFalse(result["commercial_document_authorized"])
+
     def check_single_item_routing(self, enabled):
         spec = importlib.util.spec_from_file_location("j14_position_under_test",
             Path(__file__).with_name("receipt_item_position.py"))
@@ -193,7 +208,7 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.check_single_item_routing(0)
 
     def test_whitelist_does_not_enable_guest_access(self):
-        self.assertEqual(self.frappe.whitelist.call_count, 4)
+        self.assertEqual(self.frappe.whitelist.call_count, 5)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,9 @@ from subcontracting_extensions.component_return_reversal import (
     enable_component_return_reversal,
     read_component_return_reversal,
 )
+from subcontracting_extensions.component_commercial_reader import (
+    get_component_commercial_preview,
+)
 
 
 @frappe.whitelist()
@@ -45,6 +48,15 @@ def get_material_panel(processor_lot):
         report,
         enabled=bool(cint(frappe.conf.get("v2_component_return_reversal"))),
     )
+    return dict(report, enabled=True)
+
+
+@frappe.whitelist()
+def get_commercial_preview_panel(processor_lot):
+    """Feature-gated J19A3 read-only commercial preview endpoint."""
+    if not cint(frappe.conf.get("v2_component_commercial_preview")):
+        return {"enabled": False}
+    report = get_component_commercial_preview(processor_lot)
     return dict(report, enabled=True)
 
 

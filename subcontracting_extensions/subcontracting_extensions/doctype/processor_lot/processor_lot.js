@@ -31,6 +31,7 @@ frappe.ui.form.on("Processor Lot", {
     async refresh(frm) {
         frm.__j16_completion_report = null;
         frm.__j16_material_report = null;
+        frm.__j19_commercial_report = null;
         void render_j14_material_panel(frm);
         if (await render_multi_item_receipt_checkpoint(frm)) return;
         set_field_properties(frm);
@@ -407,6 +408,7 @@ function j18_bind_component_return_actions(frm, wrapper) {
 async function render_j14_material_panel(frm) {
     const wrapper = frm.get_field("material_reconciliation_html")?.$wrapper;
     if (!wrapper) return;
+    frm.__j19_commercial_report = null;
     frm.get_field("operational_guidance_html")?.$wrapper.html("");
     frm.set_df_property("operational_guidance_section", "hidden", 1);
     const ticket = frm.__j14_material_request = (frm.__j14_material_request || 0) + 1;
@@ -426,6 +428,8 @@ async function render_j14_material_panel(frm) {
         wrapper.html(build_j14_material_panel(report));
         j18_bind_component_return_actions(frm, wrapper);
         frm.set_df_property("material_reconciliation_section", "hidden", 0);
+        await load_j19_commercial_preview(frm, current, name, sco);
+        if (!current()) return;
         render_j16_operational_guidance(frm);
     } catch (error) {
         if (!current()) return;
@@ -433,6 +437,99 @@ async function render_j14_material_panel(frm) {
             <p>${j14_escape(__("Check read permissions and source evidence, then reload. No material status has been verified."))}</p>`);
         frm.set_df_property("material_reconciliation_section", "hidden", 0);
     }
+}
+
+async function load_j19_commercial_preview(frm, current, name, sco) {
+    frm.__j19_commercial_report = null;
+    try {
+        const response = await frappe.call({
+            method: "subcontracting_extensions.material_reconciliation_ui.get_commercial_preview_panel",
+            args: {processor_lot: name},
+        });
+        if (!current()) return;
+        const report = response.message;
+        if (!report?.enabled) return;
+        if (report.processor_lot !== name || report.subcontracting_order !== sco) {
+            frm.__j19_commercial_report = {enabled: true, error: true};
+            return;
+        }
+        frm.__j19_commercial_report = report;
+    } catch (error) {
+        if (current()) frm.__j19_commercial_report = {enabled: true, error: true};
+    }
+}
+
+function j19_decision_label(code) {
+    const labels = {
+        NO_RAW_MATERIAL_RECOVERY: "No raw-material recovery",
+        RAW_MATERIAL_CREDIT_ACCOUNTED: "Raw-material credit accounted",
+        NO_PROCESSING_RECOVERY: "No processing recovery",
+        PROCESSING_RECOVERY_POLICY_DISABLED: "Processing recovery disabled by policy",
+        PROCESSING_RECOVERY_RECOMMENDED: "Processing recovery recommended",
+        ACCOUNT_REMAINING_MATERIAL: "Account for remaining material",
+        REVIEW_COMPONENT_IDENTITY: "Review component identity",
+        REVIEW_COMPONENT_EVIDENCE: "Review component evidence",
+        REVIEW_FINISHED_ITEM_IDENTITY: "Review finished-item identity",
+        REVIEW_FINISHED_ITEM_COMMERCIAL_EVIDENCE: "Review finished-item commercial evidence",
+        REVIEW_FINISHED_ITEM_QUANTITY_EVIDENCE: "Review finished-item quantity evidence",
+        REVIEW_FINISHED_ITEM_INVOICING: "Review finished-item invoicing",
+        REVIEW_FINISHED_ITEM_UOM: "Review finished-item UOM",
+        REVIEW_PROCESSING_RATE_EVIDENCE: "Review processing-rate evidence",
+        COMMERCIAL_REVIEW_COMPLETE_NO_RECOVERY: "Commercial review complete—no recovery",
+        COMMERCIAL_RECOVERY_RECOMMENDED: "Commercial recovery recommended",
+        REVIEW_LEGACY_COMMERCIAL_EVIDENCE: "Review legacy commercial evidence",
+        REVIEW_SETTLEMENT_POLICY: "Review settlement policy",
+        PROCESSOR_LOT_POLICY_DIFFERS_FROM_PURCHASE_ORDER: "Processor Lot policy differs from Purchase Order",
+        PROCESSOR_LOT_SETTLEMENT_BASIS_DIFFERS_FROM_PURCHASE_ORDER: "Processor Lot settlement basis differs from Purchase Order",
+        SETTLEMENT_POLICY_OVERRIDE_EVIDENCE_INCOMPLETE: "Settlement policy override evidence is incomplete",
+        DUPLICATE_COMPONENT_IDENTITY: "Duplicate component identity",
+        DUPLICATE_FINISHED_ITEM_IDENTITY: "Duplicate finished-item identity",
+    };
+    return __(labels[code] || code || "Commercial evidence requires review");
+}
+
+function j19_decision_html(code, permitted) {
+    const no_recovery = new Set(["NO_RAW_MATERIAL_RECOVERY", "RAW_MATERIAL_CREDIT_ACCOUNTED",
+        "NO_PROCESSING_RECOVERY", "PROCESSING_RECOVERY_POLICY_DISABLED",
+        "COMMERCIAL_REVIEW_COMPLETE_NO_RECOVERY"]);
+    const tone = no_recovery.has(code) && permitted === true ? "green" : "amber";
+    return `<div>${j14_badge(j19_decision_label(code), tone)}</div>
+        <div class="text-muted" style="margin-top:5px">${j14_escape(__("No commercial document is authorised."))}</div>`;
+}
+
+function build_j19_commercial_panel(report) {
+    if (report.error) return `<div style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
+        <p>${j14_badge(__("Commercial evidence unavailable"), "red")}</p>
+        <p>${j14_escape(__("Check read permissions and commercial evidence, then reload. No commercial decision or lot closure is authorised."))}</p>
+    </div>`;
+    const invoice_evidence = rows => (rows || []).map(row =>
+        `${j14_link("Purchase Invoice", row.purchase_invoice)} / ${j14_escape(row.purchase_invoice_item || "—")}`
+    ).join("<br>") || j14_escape(__("Not created"));
+    const finished_rows = (report.finished_items || []).map(row => [
+        j14_escape(row.finished_item), j14_escape(row.stock_uom), j14_qty(row.company_accepted_qty),
+        row.supplier_invoice_qty == null ? "—" : j14_qty(row.supplier_invoice_qty),
+        row.commercial_variance_qty == null ? "—" : j14_qty(row.commercial_variance_qty),
+        j19_decision_html(row.commercial_decision_code, row.commercial_review_permitted),
+        invoice_evidence(row.matched_invoice_rows),
+    ]);
+    const component_rows = (report.components || []).map(row => [
+        j14_escape(row.component_item), j14_escape(row.stock_uom), j14_qty(row.physical_remaining_qty),
+        j14_qty(row.applied_credit_qty), j14_qty(row.unaccounted_remaining_qty),
+        j19_decision_html(row.commercial_decision_code, row.commercial_review_permitted),
+    ]);
+    const policy = (report.policy_issues || []).map(code =>
+        `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
+    const legacy = (report.legacy_evidence || []).map(row =>
+        `<li>${j14_link(row.doctype, row.name)} — ${j14_escape(__(row.reason || "Legacy evidence"))}</li>`).join("");
+    return `<div data-j19-commercial-preview style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
+        <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("Component commercial preview"))}</div>
+        <div style="margin-bottom:8px">${j19_decision_html(report.commercial_decision_code, report.commercial_review_permitted)}</div>
+        <p class="text-muted">${j14_escape(__("Read-only preview. No commercial document or lot closure is authorised."))}</p>
+        ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Decision", "Invoice Evidence"], finished_rows)}
+        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Decision"], component_rows)}
+        ${policy ? `<div>${j14_badge(__("Settlement policy requires review"), "amber")}<ul>${policy}</ul></div>` : ""}
+        ${legacy ? `<div>${j14_badge(__("Legacy commercial evidence"), "amber")}<ul>${legacy}</ul></div>` : ""}
+    </div>`;
 }
 
 const J16_DETAIL_SECTIONS = ["processor_settlement_policy_section", "settlement_policy_override_section", "settlement_details_section",
@@ -468,7 +565,7 @@ function j16_apply_view(frm, detailed) {
     frm.set_df_property("operational_guidance_section", "hidden", 0);
 }
 
-function j16_guidance_state(frm, material, completion) {
+function j16_guidance_state(frm, material, completion, commercial) {
     const completed_history = frm.doc.docstatus === 1 && frm.doc.settlement_status === "Completed";
     if (material.evidence_consistent !== true) return {tone: "red", title: __("Review material evidence"),
         detail: __("Correct the highlighted material evidence before any commercial treatment or lot closure is considered."), link: ""};
@@ -489,6 +586,28 @@ function j16_guidance_state(frm, material, completion) {
     if (completion?.enabled && completion.journey_complete !== true) return {tone: "amber",
         title: __("Complete receipt and invoicing evidence"),
         detail: __("Open Detailed view to see the first unverified SCR, Purchase Receipt, or Purchase Invoice."), link: ""};
+    if (commercial?.error) return {tone: "red", title: __("Commercial evidence unavailable"),
+        detail: __("Check read permissions and commercial evidence, then reload. No commercial decision or lot closure is authorised."), link: ""};
+    if (commercial?.enabled) {
+        const states = {
+            COMMERCIAL_REVIEW_COMPLETE_NO_RECOVERY: ["green", "Commercial review complete—no recovery",
+                "Exact component and finished-item evidence shows no recovery. No commercial document or lot closure is authorised."],
+            COMMERCIAL_RECOVERY_RECOMMENDED: ["amber", "Commercial recovery requires review",
+                "A finished-row processing variance is available for classification. No commercial document or lot closure is authorised."],
+            REVIEW_LEGACY_COMMERCIAL_EVIDENCE: ["amber", "Review legacy commercial evidence",
+                "Historical settlement evidence is preserved but does not authorise a new component-scoped commercial action."],
+            REVIEW_SETTLEMENT_POLICY: ["amber", "Review settlement policy",
+                "Correct the highlighted settlement-policy evidence before commercial treatment."],
+            ACCOUNT_REMAINING_MATERIAL: ["amber", "Account for remaining material",
+                "Complete the component material accounting before commercial treatment."],
+            REVIEW_FINISHED_ITEM_COMMERCIAL_EVIDENCE: ["amber", "Review commercial evidence",
+                "Correct the highlighted finished-item receipt or invoice evidence before commercial treatment."],
+        };
+        const [tone, title, detail] = states[commercial.commercial_decision_code]
+            || ["amber", "Review commercial evidence", commercial.commercial_decision_detail
+                || "Commercial evidence requires review."];
+        return {tone, title: __(title), detail: __(detail), link: ""};
+    }
     if (material.commercial_policy_status === "DEFERRED") return {tone: "amber",
         title: __("Material position reconciled"),
         detail: __("Material and receipt evidence are complete. Commercial treatment has not been determined. No commercial document or lot closure is authorised."), link: ""};
@@ -501,19 +620,26 @@ function render_j16_operational_guidance(frm) {
     const material = frm.__j16_material_report;
     if (!field?.$wrapper || !material || frm.is_new()) return;
     const detailed = j16_detailed_preference();
-    const state = j16_guidance_state(frm, material, frm.__j16_completion_report);
-    const rows = (material.components || []).map(row => [j14_escape(row.component_item), j14_escape(row.stock_uom),
+    const commercial = frm.__j19_commercial_report;
+    const state = j16_guidance_state(frm, material, frm.__j16_completion_report, commercial);
+    const commercial_components = new Map((commercial?.components || []).map(row => [row.sco_supplied_item, row]));
+    const rows = (material.components || []).map(row => {
+        const decision = commercial_components.get(row.sco_supplied_item);
+        return [j14_escape(row.component_item), j14_escape(row.stock_uom),
         j14_qty(row.physical_remaining_qty), j14_qty(row.applied_credit_qty), j14_qty(row.unaccounted_remaining_qty),
         j14_badge(__(row.material_next_action_label || "Review component evidence"),
             row.evidence_consistent !== true ? "red" : row.material_settlement_eligible === true ? "green" : "amber"),
         j18_component_return_html(row),
-        `<div>${j14_badge(__(row.commercial_treatment_label || "Commercial treatment not determined"), "neutral")}</div>
-            <div class="text-muted" style="margin-top:5px">${j14_escape(__(row.component_action_detail || "No commercial document is authorised."))}</div>`]);
+        decision ? j19_decision_html(decision.commercial_decision_code, decision.commercial_review_permitted)
+            : `<div>${j14_badge(__("Commercial treatment not determined"), "neutral")}</div>
+                <div class="text-muted" style="margin-top:5px">${j14_escape(__("No commercial document is authorised."))}</div>`];
+    });
     field.$wrapper.html(`<div style="border:1px solid #8baecb;border-radius:8px;padding:14px;background:#f7fbfe">
         <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("What to do next"))}</div>
         <div>${j14_badge(state.title, state.tone)} ${state.link}</div>
         <div style="margin-top:8px">${j14_escape(state.detail)}</div>
         ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Material Action", "Component Return", "Commercial Treatment"], rows)}
+        ${commercial?.enabled ? build_j19_commercial_panel(commercial) : ""}
         <label style="display:inline-flex;align-items:center;gap:7px;margin:4px 0 0;cursor:pointer;font-weight:500">
             <input type="checkbox" data-j16-detailed ${detailed ? "checked" : ""}>
             ${j14_escape(__("Show detailed audit evidence"))}
