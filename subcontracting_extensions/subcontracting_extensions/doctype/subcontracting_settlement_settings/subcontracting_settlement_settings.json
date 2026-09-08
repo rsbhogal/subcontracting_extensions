@@ -1,0 +1,84 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-09-08 11:50:55.368746",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "settlement_methods_section",
+  "settlement_methods_help",
+  "allowed_settlement_methods",
+  "policy_controls_section",
+  "allow_processor_lot_policy_override",
+  "require_recovery_customer_for_sales_invoice",
+  "require_resolved_excess_ownership"
+ ],
+ "fields": [
+  {
+   "fieldname": "settlement_methods_section",
+   "fieldtype": "Section Break",
+   "label": "Allowed Settlement Methods"
+  },
+  {
+   "fieldname": "settlement_methods_help",
+   "fieldtype": "HTML",
+   "options": "<p class=\"text-muted\">Enable only the settlement methods approved for subcontracting. Method direction and safety requirements are fixed by the application. A configured method does not by itself authorise document creation.</p>"
+  },
+  {
+   "fieldname": "allowed_settlement_methods",
+   "fieldtype": "Table",
+   "label": "Settlement Methods",
+   "options": "Subcontracting Allowed Settlement Method",
+   "reqd": 1
+  },
+  {
+   "fieldname": "policy_controls_section",
+   "fieldtype": "Section Break",
+   "label": "Policy Controls"
+  },
+  {
+   "default": "1",
+   "description": "Allows an authorised Processor Lot user to override inherited method defaults with complete override evidence. It never enables a settlement document by itself.",
+   "fieldname": "allow_processor_lot_policy_override",
+   "fieldtype": "Check",
+   "label": "Allow Processor Lot Policy Override"
+  },
+  {
+   "default": "1",
+   "description": "Fixed safety rule: Sales Invoice treatment requires an enabled, explicitly bound Recovery Customer.",
+   "fieldname": "require_recovery_customer_for_sales_invoice",
+   "fieldtype": "Check",
+   "label": "Require Recovery Customer for Sales Invoice",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "description": "Fixed safety rule: unexplained excess remains blocked until material ownership is resolved.",
+   "fieldname": "require_resolved_excess_ownership",
+   "fieldtype": "Check",
+   "label": "Require Resolved Ownership for Excess",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-09-08 11:50:55.368746",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Extensions",
+ "name": "Subcontracting Settlement Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

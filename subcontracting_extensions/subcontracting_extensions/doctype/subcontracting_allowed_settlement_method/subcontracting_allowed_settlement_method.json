@@ -1,0 +1,104 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-09-08 11:50:25.983413",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "is_default",
+  "method_code",
+  "method_label",
+  "variance_direction",
+  "approval_role",
+  "requirements_section",
+  "requires_customer",
+  "stock_treatment",
+  "accounting_document_type"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_default",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Default"
+  },
+  {
+   "fieldname": "method_code",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Settlement Method",
+   "options": "\nPURCHASE_DEBIT_NOTE\nSALES_INVOICE\nSUPPLIER_CREDIT_NOTE\nCOMPONENT_RETURN\nCOMMERCIAL_WAIVER\nPENDING_INVESTIGATION\nCARRY_FORWARD_TO_LOT\nREALLOCATE_COMPANY_MATERIAL\nSUPPLEMENTARY_SUBCONTRACTED_PO\nPURCHASE_SUPPLIER_OWNED_EXCESS\nACCEPT_WITHOUT_ADDITIONAL_CHARGE\nRETURN_OR_REJECT_EXCESS\nPENDING_OWNERSHIP_INVESTIGATION",
+   "reqd": 1
+  },
+  {
+   "fieldname": "method_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Method Label",
+   "read_only": 1
+  },
+  {
+   "fieldname": "variance_direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Variance Direction",
+   "options": "\nShortage\nExcess",
+   "read_only": 1
+  },
+  {
+   "description": "Role required for a later controlled execution action. Empty means the execution checkpoint must apply its own fixed role policy.",
+   "fieldname": "approval_role",
+   "fieldtype": "Link",
+   "label": "Approval Role",
+   "options": "Role"
+  },
+  {
+   "fieldname": "requirements_section",
+   "fieldtype": "Section Break",
+   "label": "Fixed Method Requirements"
+  },
+  {
+   "default": "0",
+   "fieldname": "requires_customer",
+   "fieldtype": "Check",
+   "label": "Requires Recovery Customer",
+   "read_only": 1
+  },
+  {
+   "fieldname": "stock_treatment",
+   "fieldtype": "Data",
+   "label": "Stock Treatment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "accounting_document_type",
+   "fieldtype": "Data",
+   "label": "Accounting Document Type",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-08 11:50:25.983413",
+ "modified_by": "Administrator",
+ "module": "Subcontracting Extensions",
+ "name": "Subcontracting Allowed Settlement Method",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "idx",
+ "sort_order": "ASC",
+ "states": []
+}
