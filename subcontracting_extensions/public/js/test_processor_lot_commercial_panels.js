@@ -82,7 +82,7 @@ function commercial() {
 
 (async () => {
     const report = commercial();
-    let html = context.build_j19_commercial_panel(report);
+    let html = context.build_j19_commercial_panel(report, true);
     assert(html.includes("Component commercial preview"));
     assert(html.includes("Read-only preview. No commercial document or lot closure is authorised."));
     assert(html.includes("Policy ready") && html.includes("Pending Investigation"));
@@ -104,16 +104,42 @@ function commercial() {
         allowed_classifications: [{value: "NO_COMMERCIAL_ACTION_REQUIRED",
             label: "No Commercial Action Required"}], allowed_treatments: [],
     };
-    html = context.build_j19_commercial_panel(report);
+    html = context.build_j19_commercial_panel(report, true);
     assert(html.includes("Controlled decision entry only"));
     assert(html.includes("data-j19-decision=\"classification\""));
     assert(html.includes("Records a decision only"));
     assert(!html.includes("Create Debit Note"));
 
+    report.finished_items[1].decision_capability = {
+        variance_direction: "Shortage", classification_entry_available: true,
+        treatment_selection_available: false,
+        allowed_classifications: [{value: "NO_COMMERCIAL_ACTION_REQUIRED",
+            label: "No Commercial Action Required"}], allowed_treatments: [],
+    };
+    html = context.build_j19_commercial_panel(report);
+    assert(html.includes("Commercial decisions") && html.includes("1 of 4 scopes classified"));
+    assert(html.includes("Only scopes needing a decision are shown below."));
+    assert(html.includes("Cup") && html.includes("Classify"));
+    assert(!html.includes("Policy Source") && !html.includes("Invoice Evidence"));
+    assert(!html.includes("Approved &lt;reason&gt;"));
+
+    report.finished_items[1].persisted_classification = {
+        classification: "NO_COMMERCIAL_ACTION_REQUIRED", classification_revision: 1,
+        treatment_revision: 0, selected_treatment_method: null,
+    };
+    report.finished_items[0].persisted_classification = {
+        classification: "NO_COMMERCIAL_ACTION_REQUIRED", classification_revision: 1,
+        treatment_revision: 0, selected_treatment_method: null,
+    };
+    html = context.build_j19_commercial_panel(report);
+    assert(html.includes("3 of 4 scopes classified"));
+    assert(html.includes("No commercial decision currently requires attention."));
+    assert(!html.includes("<table"));
+
     report.policy_issues = ["PROCESSOR_LOT_POLICY_DIFFERS_FROM_PURCHASE_ORDER"];
     report.legacy_evidence = [{doctype: "Processor Material Account Entry", name: 'PMA/a?"<>',
         reason: "Missing exact SCO supplied row <unsafe>"}];
-    html = context.build_j19_commercial_panel(report);
+    html = context.build_j19_commercial_panel(report, true);
     assert(html.includes("Settlement policy requires review"));
     assert(html.includes("/app/processor-material-account-entry/PMA%2Fa%3F%22%3C%3E"));
     assert(html.includes("&lt;unsafe&gt;") && !html.includes("<unsafe>"));
@@ -123,15 +149,17 @@ function commercial() {
         ? material() : commercial()});
     await context.render_j14_material_panel(frm);
     const guidance = frm.get_field("operational_guidance_html").$wrapper.markup;
-    assert(guidance.includes("Component commercial preview"));
-    assert(guidance.includes("No raw-material recovery"));
+    assert(guidance.includes("Commercial decisions"));
+    assert(guidance.includes("1 of 4 scopes classified"));
+    assert(guidance.includes("Decision entry is currently disabled."));
+    assert(!guidance.includes("Policy Source") && !guidance.includes("Invoice Evidence"));
     assert.strictEqual(frm.__j19_commercial_report.commercial_reader_version, undefined);
 
     context.frappe.call = async options => ({message: options.method.endsWith("get_material_panel")
         ? material() : {enabled: false}});
     await context.render_j14_material_panel(frm);
     assert.strictEqual(frm.__j19_commercial_report, null);
-    assert(!frm.get_field("operational_guidance_html").$wrapper.markup.includes("Component commercial preview"));
+    assert(!frm.get_field("operational_guidance_html").$wrapper.markup.includes("Commercial decisions"));
 
     context.frappe.call = async options => {
         if (options.method.endsWith("get_material_panel")) return {message: material()};

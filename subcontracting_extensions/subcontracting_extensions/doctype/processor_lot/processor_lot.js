@@ -549,7 +549,53 @@ function j19_decision_actions_html(row, scope_type, index) {
             __("Records a decision only; no document or lot closure is authorised."))}</div>`;
 }
 
-function build_j19_commercial_panel(report) {
+function build_j19_commercial_summary(report) {
+    const scopes = [
+        ...(report.finished_items || []).map((row, index) => ({row, index, scope_type: "Finished Item"})),
+        ...(report.components || []).map((row, index) => ({row, index, scope_type: "Raw Material"})),
+    ];
+    const classified = scopes.filter(scope => scope.row.persisted_classification?.classification).length;
+    const pending = scopes.filter(scope => {
+        const persisted = scope.row.persisted_classification || {};
+        const capability = scope.row.decision_capability || {};
+        return (!persisted.classification && capability.classification_entry_available)
+            || (persisted.classification && capability.treatment_selection_available
+                && !persisted.selected_treatment_method);
+    });
+    const progress = `${classified} ${__("of")} ${scopes.length} ${__("scopes classified")}`;
+    const pending_rows = pending.map(scope => {
+        const row = scope.row;
+        const persisted = row.persisted_classification || {};
+        return [
+            j14_escape(__(scope.scope_type)),
+            j14_escape(row.component_item || row.finished_item),
+            j14_escape(row.stock_uom),
+            j14_escape(j19_decision_label(row.commercial_decision_code)),
+            persisted.classification
+                ? j14_escape(persisted.classification)
+                : j14_badge(__("Not classified"), "neutral"),
+            j19_decision_actions_html(row, scope.scope_type, scope.index),
+        ];
+    });
+    return `<div data-j19-commercial-preview style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
+        <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("Commercial decisions"))}</div>
+        <div>${j14_badge(progress, pending.length ? "amber" : "green")}</div>
+        <p class="text-muted" style="margin-top:6px">${j14_escape(
+            !report.commercial_decision_entry_enabled
+                ? __("Decision entry is currently disabled.")
+                : pending.length
+                    ? __("Only scopes needing a decision are shown below.")
+                    : __("No commercial decision currently requires attention."))}</p>
+        ${report.commercial_decision_entry_enabled && pending.length ? j14_table(
+            ["Scope", "Item", "UOM", "Evidence", "Current Decision", "Action"], pending_rows
+        ) : ""}
+        <p class="text-muted">${j14_escape(__(
+            "Decision entry does not create a commercial, stock, or accounting document and does not authorise lot closure."))}</p>
+    </div>`;
+}
+
+function build_j19_commercial_panel(report, detailed = false) {
+    if (!detailed && !report.error) return build_j19_commercial_summary(report);
     if (report.error) return `<div style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
         <p>${j14_badge(__("Commercial evidence unavailable"), "red")}</p>
         <p>${j14_escape(__("Check read permissions and commercial evidence, then reload. No commercial decision or lot closure is authorised."))}</p>
@@ -782,7 +828,7 @@ function render_j16_operational_guidance(frm) {
         <div>${j14_badge(state.title, state.tone)} ${state.link}</div>
         <div style="margin-top:8px">${j14_escape(state.detail)}</div>
         ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Material Action", "Component Return", "Commercial Treatment"], rows)}
-        ${commercial?.enabled ? build_j19_commercial_panel(commercial) : ""}
+        ${commercial?.enabled ? build_j19_commercial_panel(commercial, detailed) : ""}
         <label style="display:inline-flex;align-items:center;gap:7px;margin:4px 0 0;cursor:pointer;font-weight:500">
             <input type="checkbox" data-j16-detailed ${detailed ? "checked" : ""}>
             ${j14_escape(__("Show detailed audit evidence"))}
@@ -795,7 +841,7 @@ function render_j16_operational_guidance(frm) {
     toggle?.off?.("change.j16").on?.("change.j16", function () {
         const value = Boolean(this.checked);
         j16_set_detailed_preference(value);
-        j16_apply_view(frm, value);
+        render_j16_operational_guidance(frm);
     });
 }
 
