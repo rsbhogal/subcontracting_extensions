@@ -1,10 +1,12 @@
 """J19A2 authoritative reader tests using read-only in-memory evidence."""
 
 import unittest
+import json
 from copy import deepcopy
 from unittest.mock import patch
 
 from subcontracting_extensions import component_commercial_reader as reader
+from subcontracting_extensions.commercial_classification_policy import make_event_key, make_scope_key
 
 
 class Doc(dict):
@@ -263,6 +265,58 @@ class TestComponentCommercialReader(unittest.TestCase):
         self.assertFalse(result["commercial_document_creation_enabled"])
         self.assertFalse(result["commercial_document_authorized"])
         self.assertFalse(result["lot_closure_authorized"])
+
+    def test_exact_persisted_classification_is_attached_read_only(self):
+        scope_key = make_scope_key(dict(scope_type="Raw Material", processor_lot="LOT",
+            sco_supplied_item="RM-A", sco_finished_item="FG-A",
+            component_item="RM ITEM A", stock_uom="Kg"))
+        classification = self.api.add("Processor Lot Commercial Classification", "PLCC-1",
+            processor_lot="LOT", subcontracting_order="SCO", purchase_order="PO",
+            company="Company", supplier="Supplier", scope_type="Raw Material",
+            scope_key=scope_key, sco_supplied_item="RM-A", sco_finished_item="FG-A",
+            component_item="RM ITEM A", stock_uom="Kg", purchase_order_item=None,
+            current_variance_direction="Shortage", current_classification="PROCESSOR_RESPONSIBLE",
+            current_treatment_method=None, classification_revision=1, treatment_revision=0,
+            last_decision_event="PLCD-1", last_decision_by="user@example.com",
+            last_decision_at="2026-09-09 10:00:00")
+        policy = self.read()["settlement_policy"]
+        self.api.add("Processor Lot Commercial Decision Event", "PLCD-1",
+            commercial_classification=classification.name, scope_key=scope_key,
+            event_sequence=1, event_key=make_event_key(scope_key, 1),
+            event_type="Classification", supersedes_event=None,
+            variance_direction="Shortage", classification="PROCESSOR_RESPONSIBLE",
+            selected_treatment_method=None, reason="Verified", decision_by="user@example.com",
+            decision_at="2026-09-09 10:00:00", evidence_code="NO_RAW_MATERIAL_RECOVERY",
+            policy_snapshot=json.dumps(policy, sort_keys=True, separators=(",", ":")),
+            commercial_document_authorized=0, lot_closure_authorized=0)
+        result = self.read()
+        evidence = result["components"][0]["persisted_classification"]
+        self.assertEqual(result["classification_issues"], [])
+        self.assertEqual(evidence["classification"], "PROCESSOR_RESPONSIBLE")
+        self.assertEqual(evidence["decision_events"][0]["reason"], "Verified")
+        self.assertFalse(evidence["commercial_document_authorized"])
+
+    def test_stale_decision_policy_fails_closed(self):
+        scope_key = make_scope_key(dict(scope_type="Finished Item", processor_lot="LOT",
+            sco_finished_item="FG-A", purchase_order_item="PO-A"))
+        classification = self.api.add("Processor Lot Commercial Classification", "PLCC-2",
+            processor_lot="LOT", scope_type="Finished Item", scope_key=scope_key,
+            sco_supplied_item=None, sco_finished_item="FG-A", component_item=None,
+            stock_uom="Kg", purchase_order_item="PO-A", last_decision_event="PLCD-2")
+        self.api.add("Processor Lot Commercial Decision Event", "PLCD-2",
+            commercial_classification=classification.name, scope_key=scope_key,
+            event_sequence=1, event_key=make_event_key(scope_key, 1),
+            event_type="Classification", supersedes_event=None,
+            variance_direction="Shortage", classification="PROCESSOR_RESPONSIBLE",
+            reason="Reviewed", decision_by="user@example.com", decision_at=None,
+            policy_snapshot="{}", commercial_document_authorized=0,
+            lot_closure_authorized=0)
+        result = self.read()
+        self.assertIn("COMMERCIAL_DECISION_POLICY_SNAPSHOT_STALE",
+                      result["classification_issues"])
+        self.assertEqual(result["commercial_decision_code"],
+                         "REVIEW_PERSISTED_COMMERCIAL_CLASSIFICATION")
+        self.assertFalse(result["commercial_document_authorized"])
 
     def test_supplied_inputs_are_not_mutated(self):
         before = deepcopy((self.material, self.completion))

@@ -60,7 +60,11 @@ function commercial() {
         components: [
             {sco_supplied_item: "RM-KG", component_item: "Wire <unsafe>", stock_uom: "Kg",
                 physical_remaining_qty: 0, applied_credit_qty: 0, unaccounted_remaining_qty: 0,
-                commercial_decision_code: "NO_RAW_MATERIAL_RECOVERY", commercial_review_permitted: true},
+                commercial_decision_code: "NO_RAW_MATERIAL_RECOVERY", commercial_review_permitted: true,
+                persisted_classification: {classification: "PROCESSOR_RESPONSIBLE",
+                    selected_treatment_method: "COMMERCIAL_WAIVER", classification_revision: 2,
+                    last_decision_by: "auditor<unsafe>", last_decision_at: "2026-09-09 10:00:00",
+                    decision_events: [{reason: "Approved <reason>"}]}},
             {sco_supplied_item: "RM-UNIT", component_item: "Blank", stock_uom: "Units",
                 physical_remaining_qty: 0, applied_credit_qty: 0, unaccounted_remaining_qty: 0,
                 commercial_decision_code: "RAW_MATERIAL_CREDIT_ACCOUNTED", commercial_review_permitted: true},
@@ -88,6 +92,9 @@ function commercial() {
     assert(html.includes("Drawn &lt;unsafe&gt;") && !html.includes("Drawn <unsafe>"));
     assert(html.includes("/app/purchase-invoice/PI%2Fa%3F%22%3C%3E"));
     assert(html.includes("ROW&lt;1&gt;") && !html.includes("ROW<1>"));
+    assert(html.includes("Persisted Classification") && html.includes("PROCESSOR_RESPONSIBLE"));
+    assert(html.includes("COMMERCIAL_WAIVER") && html.includes("auditor&lt;unsafe&gt;"));
+    assert(html.includes("Approved &lt;reason&gt;") && !html.includes("Approved <reason>"));
     assert(!html.includes("Create Debit Note") && !html.includes("<button"));
 
     report.policy_issues = ["PROCESSOR_LOT_POLICY_DIFFERS_FROM_PURCHASE_ORDER"];

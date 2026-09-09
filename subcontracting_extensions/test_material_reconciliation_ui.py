@@ -1,5 +1,6 @@
 """J14 endpoint contract with a scoped Frappe stub; no site or writes."""
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -8,7 +9,8 @@ from unittest.mock import Mock, patch
 
 class TestMaterialReconciliationUI(unittest.TestCase):
     def setUp(self):
-        self.frappe = SimpleNamespace(conf={}, whitelist=Mock(return_value=lambda fn: fn))
+        self.frappe = SimpleNamespace(conf={}, whitelist=Mock(return_value=lambda fn: fn),
+                                      parse_json=json.loads)
         spec = importlib.util.spec_from_file_location("j14_endpoint_under_test",
             Path(__file__).with_name("material_reconciliation_ui.py"))
         self.module = importlib.util.module_from_spec(spec)
@@ -159,6 +161,31 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.assertIs(args[1], self.module._read_component_return_report)
         self.assertEqual(args[2:], ("LOT", "RM-A", "STE", "1"))
 
+    def test_commercial_decision_persistence_is_flag_guarded_and_delegated(self):
+        self.frappe.throw = Mock(side_effect=RuntimeError)
+        identity = '{"sco_finished_item":"FG-A","purchase_order_item":"PO-A"}'
+        with self.assertRaises(RuntimeError):
+            self.module.record_commercial_decision(
+                "LOT", "Finished Item", identity, "Classification", "Shortage",
+                "PROCESSOR_RESPONSIBLE", "Reviewed evidence")
+
+        self.frappe.conf["v2_component_commercial_classification"] = 1
+        self.module.persist_commercial_decision = Mock(return_value={
+            "commercial_document_authorized": False,
+            "lot_closure_authorized": False,
+        })
+        result = self.module.record_commercial_decision(
+            "LOT", "Finished Item", identity, "Classification", "Shortage",
+            "PROCESSOR_RESPONSIBLE", "Reviewed evidence")
+        args = self.module.persist_commercial_decision.call_args.args
+        self.assertIs(args[0], self.frappe)
+        self.assertIs(args[1], self.module.get_component_commercial_preview)
+        self.assertEqual(args[2], "LOT")
+        self.assertEqual(args[4], {"sco_finished_item": "FG-A",
+                                   "purchase_order_item": "PO-A"})
+        self.assertFalse(result["commercial_document_authorized"])
+        self.assertFalse(result["lot_closure_authorized"])
+
     def test_read_only_permission_is_reported_without_enabling_action(self):
         self.frappe.conf["v2_processor_first_material_facts"] = 1
         lot = SimpleNamespace(has_permission=Mock(return_value=False))
@@ -208,7 +235,7 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.check_single_item_routing(0)
 
     def test_whitelist_does_not_enable_guest_access(self):
-        self.assertEqual(self.frappe.whitelist.call_count, 5)
+        self.assertEqual(self.frappe.whitelist.call_count, 6)
 
 
 if __name__ == "__main__":

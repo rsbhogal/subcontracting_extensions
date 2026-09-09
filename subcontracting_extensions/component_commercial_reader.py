@@ -1,6 +1,7 @@
 """J19A2 authoritative read-only component commercial preview reader."""
 
 from copy import deepcopy
+import json
 
 from subcontracting_extensions.component_commercial_preview import (
     build_component_commercial_preview,
@@ -13,6 +14,12 @@ from subcontracting_extensions.settlement_method_policy import (
     get_default_method,
     get_method_contract,
     initial_method_rows,
+)
+from subcontracting_extensions.commercial_classification_policy import (
+    FINISHED_ITEM,
+    RAW_MATERIAL,
+    make_event_key,
+    make_scope_key,
 )
 
 
@@ -84,6 +91,13 @@ def _read_component_commercial_preview(
             "legacy_evidence": legacy_evidence,
         },
     )
+    classification_issues = _attach_persisted_classifications(api, lot, result, policy)
+    if classification_issues:
+        result["commercial_review_permitted"] = False
+        result["commercial_decision_code"] = "REVIEW_PERSISTED_COMMERCIAL_CLASSIFICATION"
+        result["commercial_decision_detail"] = (
+            "Correct persisted commercial-classification evidence before treatment."
+        )
     result.update(
         commercial_reader_version=READER_VERSION,
         evidence_scope=(
@@ -93,11 +107,170 @@ def _read_component_commercial_preview(
         receipt_completion=deepcopy(completion),
         settlement_policy=policy,
         policy_issues=policy_issues,
+        classification_issues=classification_issues,
+        commercial_classification_contract_version="J19B1C",
         commercial_document_creation_enabled=False,
         commercial_document_authorized=False,
         lot_closure_authorized=False,
     )
     return result
+
+
+def _attach_persisted_classifications(api, lot, result, current_policy):
+    """Attach exact J19B1C evidence, failing closed on duplicates or broken history."""
+    issues = []
+    rows = api.get_all(
+        "Processor Lot Commercial Classification",
+        filters={"processor_lot": lot.name},
+        fields=["name", "scope_key", "scope_type"],
+        limit_page_length=0,
+    )
+    by_key = {}
+    for reference in rows:
+        doc = api.get_doc("Processor Lot Commercial Classification", reference.get("name"))
+        doc.check_permission("read")
+        key = doc.get("scope_key")
+        if not key or key in by_key:
+            _add_issue(issues, "DUPLICATE_COMMERCIAL_CLASSIFICATION_SCOPE")
+            continue
+        try:
+            expected = make_scope_key(doc)
+        except ValueError:
+            _add_issue(issues, "INVALID_COMMERCIAL_CLASSIFICATION_SCOPE")
+            continue
+        if expected != key:
+            _add_issue(issues, "INVALID_COMMERCIAL_CLASSIFICATION_SCOPE")
+            continue
+        evidence, event_issues = _read_decision_history(api, doc, current_policy)
+        for issue in event_issues:
+            _add_issue(issues, issue)
+        by_key[key] = evidence
+
+    matched = set()
+    for scope_type, target in (
+        (RAW_MATERIAL, result.get("components") or []),
+        (FINISHED_ITEM, result.get("finished_items") or []),
+    ):
+        for row in target:
+            try:
+                key = make_scope_key(dict(row, scope_type=scope_type,
+                                          processor_lot=lot.name))
+            except ValueError:
+                row["persisted_classification"] = None
+                continue
+            row["commercial_scope_key"] = key
+            row["persisted_classification"] = deepcopy(by_key.get(key))
+            if key in by_key:
+                matched.add(key)
+    if set(by_key) - matched:
+        _add_issue(issues, "ORPHANED_COMMERCIAL_CLASSIFICATION_SCOPE")
+    result["persisted_classifications"] = [deepcopy(by_key[key]) for key in sorted(matched)]
+    return issues
+
+
+def _read_decision_history(api, classification, current_policy):
+    issues = []
+    references = api.get_all(
+        "Processor Lot Commercial Decision Event",
+        filters={"commercial_classification": classification.name},
+        fields=["name", "event_sequence"],
+        limit_page_length=0,
+    )
+    events = []
+    for reference in references:
+        event = api.get_doc("Processor Lot Commercial Decision Event", reference.get("name"))
+        event.check_permission("read")
+        events.append(event)
+    events.sort(key=lambda row: int(row.get("event_sequence") or 0))
+    if [int(row.get("event_sequence") or 0) for row in events] != list(range(1, len(events) + 1)):
+        _add_issue(issues, "BROKEN_COMMERCIAL_DECISION_SEQUENCE")
+    latest = {}
+    latest_docs = {}
+    for event in events:
+        event_type = event.get("event_type")
+        if event_type not in ("Classification", "Treatment"):
+            _add_issue(issues, "INVALID_COMMERCIAL_DECISION_EVENT")
+        if event.get("scope_key") != classification.get("scope_key"):
+            _add_issue(issues, "COMMERCIAL_DECISION_SCOPE_MISMATCH")
+        try:
+            expected_event_key = make_event_key(
+                event.get("scope_key"), int(event.get("event_sequence") or 0)
+            )
+        except ValueError:
+            expected_event_key = None
+        if event.get("event_key") != expected_event_key:
+            _add_issue(issues, "INVALID_COMMERCIAL_DECISION_EVENT_KEY")
+        if not all((event.get("reason"), event.get("decision_by"), event.get("decision_at"))):
+            _add_issue(issues, "INCOMPLETE_COMMERCIAL_DECISION_AUDIT")
+        if event.get("commercial_document_authorized") or event.get("lot_closure_authorized"):
+            _add_issue(issues, "COMMERCIAL_DECISION_UNSAFE_AUTHORIZATION")
+        expected_previous = latest.get(event_type)
+        if event.get("supersedes_event") != expected_previous:
+            _add_issue(issues, "BROKEN_COMMERCIAL_DECISION_SUPERSESSION")
+        latest[event_type] = event.name
+        latest_docs[event_type] = event
+    if events:
+        try:
+            recorded_policy = json.loads(events[-1].get("policy_snapshot") or "{}")
+        except (TypeError, ValueError):
+            recorded_policy = None
+        if recorded_policy != current_policy:
+            _add_issue(issues, "COMMERCIAL_DECISION_POLICY_SNAPSHOT_STALE")
+    if classification.get("last_decision_event") != (events[-1].name if events else None):
+        _add_issue(issues, "COMMERCIAL_CLASSIFICATION_PROJECTION_MISMATCH")
+    classifications = [row for row in events if row.get("event_type") == "Classification"]
+    treatments = [row for row in events if row.get("event_type") == "Treatment"]
+    latest_classification = latest_docs.get("Classification")
+    latest_treatment = latest_docs.get("Treatment")
+    if (
+        int(classification.get("classification_revision") or 0) != len(classifications)
+        or int(classification.get("treatment_revision") or 0) != len(treatments)
+        or (latest_classification and (
+            classification.get("current_classification") != latest_classification.get("classification")
+            or classification.get("current_variance_direction") != latest_classification.get("variance_direction")
+        ))
+    ):
+        _add_issue(issues, "COMMERCIAL_CLASSIFICATION_PROJECTION_MISMATCH")
+    treatment_is_current = bool(
+        latest_treatment and latest_classification
+        and int(latest_treatment.get("event_sequence") or 0)
+        > int(latest_classification.get("event_sequence") or 0)
+    )
+    expected_treatment = (
+        latest_treatment.get("selected_treatment_method") if treatment_is_current else None
+    )
+    if classification.get("current_treatment_method") != expected_treatment:
+        _add_issue(issues, "COMMERCIAL_CLASSIFICATION_PROJECTION_MISMATCH")
+    if events and (
+        classification.get("last_decision_by") != events[-1].get("decision_by")
+        or str(classification.get("last_decision_at")) != str(events[-1].get("decision_at"))
+    ):
+        _add_issue(issues, "COMMERCIAL_CLASSIFICATION_PROJECTION_MISMATCH")
+    return {
+        "name": classification.name,
+        "scope_key": classification.get("scope_key"),
+        "scope_type": classification.get("scope_type"),
+        "variance_direction": classification.get("current_variance_direction"),
+        "classification": classification.get("current_classification"),
+        "selected_treatment_method": classification.get("current_treatment_method"),
+        "classification_revision": classification.get("classification_revision") or 0,
+        "treatment_revision": classification.get("treatment_revision") or 0,
+        "last_decision_event": classification.get("last_decision_event"),
+        "last_decision_by": classification.get("last_decision_by"),
+        "last_decision_at": classification.get("last_decision_at"),
+        "decision_events": [
+            row.as_dict() if callable(getattr(row, "as_dict", None)) else dict(row)
+            for row in events
+        ],
+        "commercial_document_creation_enabled": False,
+        "commercial_document_authorized": False,
+        "lot_closure_authorized": False,
+    }, issues
+
+
+def _add_issue(issues, code):
+    if code not in issues:
+        issues.append(code)
 
 
 def _normalize_finished_rows(api, sco, po, completion):

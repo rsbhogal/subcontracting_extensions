@@ -489,6 +489,16 @@ function j19_decision_label(code) {
         PROCESSOR_LOT_COMMERCIAL_POLICY_DIFFERS_FROM_PURCHASE_ORDER: "Processor Lot commercial policy differs from Purchase Order",
         DUPLICATE_COMPONENT_IDENTITY: "Duplicate component identity",
         DUPLICATE_FINISHED_ITEM_IDENTITY: "Duplicate finished-item identity",
+        REVIEW_PERSISTED_COMMERCIAL_CLASSIFICATION: "Review persisted commercial classification",
+        DUPLICATE_COMMERCIAL_CLASSIFICATION_SCOPE: "Duplicate commercial classification scope",
+        INVALID_COMMERCIAL_CLASSIFICATION_SCOPE: "Invalid commercial classification scope",
+        ORPHANED_COMMERCIAL_CLASSIFICATION_SCOPE: "Orphaned commercial classification scope",
+        BROKEN_COMMERCIAL_DECISION_SEQUENCE: "Broken commercial decision sequence",
+        COMMERCIAL_DECISION_SCOPE_MISMATCH: "Commercial decision scope mismatch",
+        COMMERCIAL_DECISION_UNSAFE_AUTHORIZATION: "Unsafe commercial decision authorization",
+        BROKEN_COMMERCIAL_DECISION_SUPERSESSION: "Broken commercial decision history",
+        COMMERCIAL_CLASSIFICATION_PROJECTION_MISMATCH: "Commercial classification state mismatch",
+        COMMERCIAL_DECISION_POLICY_SNAPSHOT_STALE: "Decision-time policy differs from current policy",
     };
     return __(labels[code] || code || "Commercial evidence requires review");
 }
@@ -500,6 +510,21 @@ function j19_decision_html(code, permitted) {
     const tone = no_recovery.has(code) && permitted === true ? "green" : "amber";
     return `<div>${j14_badge(j19_decision_label(code), tone)}</div>
         <div class="text-muted" style="margin-top:5px">${j14_escape(__("No commercial document is authorised."))}</div>`;
+}
+
+function j19_persisted_classification_html(evidence) {
+    if (!evidence) return `<div>${j14_badge(__("Not classified"), "neutral")}</div>
+        <div class="text-muted" style="margin-top:5px">${j14_escape(__("No persisted decision."))}</div>`;
+    const classification = j14_escape(evidence.classification || __("Not classified"));
+    const treatment = j14_escape(evidence.selected_treatment_method || __("Not selected"));
+    const events = evidence.decision_events || [];
+    const reason = events.length ? events[events.length - 1].reason : "";
+    return `<div>${j14_badge(classification, "blue")}</div>
+        <div style="margin-top:5px">${j14_escape(__("Treatment"))}: ${treatment}</div>
+        <div class="text-muted">${j14_escape(evidence.last_decision_by || "—")} ·
+            ${j14_escape(evidence.last_decision_at || "—")} ·
+            ${j14_escape(__("Revision"))} ${j14_escape(evidence.classification_revision || 0)}</div>
+        ${reason ? `<div class="text-muted">${j14_escape(reason)}</div>` : ""}`;
 }
 
 function build_j19_commercial_panel(report) {
@@ -515,12 +540,14 @@ function build_j19_commercial_panel(report) {
         row.supplier_invoice_qty == null ? "—" : j14_qty(row.supplier_invoice_qty),
         row.commercial_variance_qty == null ? "—" : j14_qty(row.commercial_variance_qty),
         j19_decision_html(row.commercial_decision_code, row.commercial_review_permitted),
+        j19_persisted_classification_html(row.persisted_classification),
         invoice_evidence(row.matched_invoice_rows),
     ]);
     const component_rows = (report.components || []).map(row => [
         j14_escape(row.component_item), j14_escape(row.stock_uom), j14_qty(row.physical_remaining_qty),
         j14_qty(row.applied_credit_qty), j14_qty(row.unaccounted_remaining_qty),
         j19_decision_html(row.commercial_decision_code, row.commercial_review_permitted),
+        j19_persisted_classification_html(row.persisted_classification),
     ]);
     const policy = (report.policy_issues || []).map(code =>
         `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
@@ -539,14 +566,17 @@ function build_j19_commercial_panel(report) {
         </div>`;
     const legacy = (report.legacy_evidence || []).map(row =>
         `<li>${j14_link(row.doctype, row.name)} — ${j14_escape(__(row.reason || "Legacy evidence"))}</li>`).join("");
+    const classification_issues = (report.classification_issues || []).map(code =>
+        `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
     return `<div data-j19-commercial-preview style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
         <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("Component commercial preview"))}</div>
         <div style="margin-bottom:8px">${j19_decision_html(report.commercial_decision_code, report.commercial_review_permitted)}</div>
         <p class="text-muted">${j14_escape(__("Read-only preview. No commercial document or lot closure is authorised."))}</p>
         ${policy_readiness}
-        ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Decision", "Invoice Evidence"], finished_rows)}
-        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Decision"], component_rows)}
+        ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Evidence", "Persisted Classification", "Invoice Evidence"], finished_rows)}
+        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Evidence", "Persisted Classification"], component_rows)}
         ${policy ? `<div>${j14_badge(__("Settlement policy requires review"), "amber")}<ul>${policy}</ul></div>` : ""}
+        ${classification_issues ? `<div>${j14_badge(__("Persisted classification requires review"), "amber")}<ul>${classification_issues}</ul></div>` : ""}
         ${legacy ? `<div>${j14_badge(__("Legacy commercial evidence"), "amber")}<ul>${legacy}</ul></div>` : ""}
     </div>`;
 }
