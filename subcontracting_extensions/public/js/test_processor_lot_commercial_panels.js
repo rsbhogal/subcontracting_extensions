@@ -97,6 +97,19 @@ function commercial() {
     assert(html.includes("Approved &lt;reason&gt;") && !html.includes("Approved <reason>"));
     assert(!html.includes("Create Debit Note") && !html.includes("<button"));
 
+    report.commercial_decision_entry_enabled = true;
+    report.finished_items[0].decision_capability = {
+        variance_direction: "Shortage", classification_entry_available: true,
+        treatment_selection_available: false,
+        allowed_classifications: [{value: "NO_COMMERCIAL_ACTION_REQUIRED",
+            label: "No Commercial Action Required"}], allowed_treatments: [],
+    };
+    html = context.build_j19_commercial_panel(report);
+    assert(html.includes("Controlled decision entry only"));
+    assert(html.includes("data-j19-decision=\"classification\""));
+    assert(html.includes("Records a decision only"));
+    assert(!html.includes("Create Debit Note"));
+
     report.policy_issues = ["PROCESSOR_LOT_POLICY_DIFFERS_FROM_PURCHASE_ORDER"];
     report.legacy_evidence = [{doctype: "Processor Material Account Entry", name: 'PMA/a?"<>',
         reason: "Missing exact SCO supplied row <unsafe>"}];

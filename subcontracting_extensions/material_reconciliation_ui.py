@@ -23,6 +23,7 @@ from subcontracting_extensions.component_commercial_reader import (
     get_component_commercial_preview,
 )
 from subcontracting_extensions.component_commercial_classification import (
+    attach_decision_capabilities,
     record_commercial_decision as persist_commercial_decision,
 )
 
@@ -60,13 +61,20 @@ def get_commercial_preview_panel(processor_lot):
     if not cint(frappe.conf.get("v2_component_commercial_preview")):
         return {"enabled": False}
     report = get_component_commercial_preview(processor_lot)
+    report = attach_decision_capabilities(
+        frappe,
+        report,
+        enabled=bool(cint(frappe.conf.get("v2_component_commercial_classification"))),
+    )
     return dict(report, enabled=True)
 
 
 @frappe.whitelist()
 def record_commercial_decision(processor_lot, scope_type, scope_identity,
                                event_type, variance_direction, decision_value,
-                               reason):
+                               reason, expected_classification_revision=0,
+                               expected_treatment_revision=0,
+                               expected_last_decision_event=None):
     """Feature-gated J19B1C persistence; no treatment execution occurs here."""
     if not cint(frappe.conf.get("v2_component_commercial_classification")):
         frappe.throw("Component commercial classification is not enabled")
@@ -80,6 +88,9 @@ def record_commercial_decision(processor_lot, scope_type, scope_identity,
         variance_direction,
         decision_value,
         reason,
+        expected_classification_revision,
+        expected_treatment_revision,
+        expected_last_decision_event,
     )
 
 

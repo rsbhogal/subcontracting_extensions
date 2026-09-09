@@ -4,7 +4,9 @@ import unittest
 
 from subcontracting_extensions.commercial_classification_policy import (
     CommercialClassificationError,
+    allowed_classifications_for_evidence,
     canonical_scope,
+    derive_variance_direction,
     make_event_key,
     make_scope_key,
     validate_classification,
@@ -116,6 +118,25 @@ class TestCommercialClassificationPolicy(unittest.TestCase):
         scope = make_scope_key(self.raw())
         self.assertEqual(make_event_key(scope, 1), make_event_key(scope, 1))
         self.assertNotEqual(make_event_key(scope, 1), make_event_key(scope, 2))
+
+    def test_direction_is_derived_from_authoritative_evidence(self):
+        self.assertEqual(derive_variance_direction(
+            "PROCESSING_RECOVERY_RECOMMENDED"), "Shortage")
+        with self.assertRaisesRegex(CommercialClassificationError, "does not prove"):
+            derive_variance_direction("REVIEW_COMPONENT_EVIDENCE")
+
+    def test_no_action_evidence_exposes_only_no_action_classification(self):
+        self.assertEqual(
+            allowed_classifications_for_evidence("NO_RAW_MATERIAL_RECOVERY"),
+            [{"value": "NO_COMMERCIAL_ACTION_REQUIRED",
+              "label": "No Commercial Action Required"}],
+        )
+
+    def test_recovery_evidence_exposes_only_shortage_choices(self):
+        values = {row["value"] for row in allowed_classifications_for_evidence(
+            "PROCESSING_RECOVERY_RECOMMENDED")}
+        self.assertIn("PROCESSOR_RESPONSIBLE", values)
+        self.assertNotIn("COMPANY_OWNED", values)
 
 
 if __name__ == "__main__":

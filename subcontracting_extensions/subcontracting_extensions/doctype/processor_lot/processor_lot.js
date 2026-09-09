@@ -527,6 +527,28 @@ function j19_persisted_classification_html(evidence) {
         ${reason ? `<div class="text-muted">${j14_escape(reason)}</div>` : ""}`;
 }
 
+function j19_decision_actions_html(row, scope_type, index) {
+    const capability = row.decision_capability || {};
+    if (!capability.classification_entry_available) {
+        return `<div>${j14_badge(__("Decision entry unavailable"), "neutral")}</div>`;
+    }
+    const persisted = row.persisted_classification || {};
+    const classification_label = persisted.classification
+        ? __("Revise Classification") : __("Classify");
+    const classification = `<button type="button" class="btn btn-xs btn-default"
+        data-j19-decision="classification" data-j19-scope="${j14_escape(scope_type)}"
+        data-j19-index="${index}">${j14_escape(classification_label)}</button>`;
+    const treatment = capability.treatment_selection_available
+        ? `<button type="button" class="btn btn-xs btn-default" style="margin-left:5px"
+            data-j19-decision="treatment" data-j19-scope="${j14_escape(scope_type)}"
+            data-j19-index="${index}">${j14_escape(persisted.selected_treatment_method
+                ? __("Revise Treatment") : __("Select Treatment"))}</button>`
+        : "";
+    return `<div>${classification}${treatment}</div>
+        <div class="text-muted" style="margin-top:5px">${j14_escape(
+            __("Records a decision only; no document or lot closure is authorised."))}</div>`;
+}
+
 function build_j19_commercial_panel(report) {
     if (report.error) return `<div style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
         <p>${j14_badge(__("Commercial evidence unavailable"), "red")}</p>
@@ -535,19 +557,21 @@ function build_j19_commercial_panel(report) {
     const invoice_evidence = rows => (rows || []).map(row =>
         `${j14_link("Purchase Invoice", row.purchase_invoice)} / ${j14_escape(row.purchase_invoice_item || "—")}`
     ).join("<br>") || j14_escape(__("Not created"));
-    const finished_rows = (report.finished_items || []).map(row => [
+    const finished_rows = (report.finished_items || []).map((row, index) => [
         j14_escape(row.finished_item), j14_escape(row.stock_uom), j14_qty(row.company_accepted_qty),
         row.supplier_invoice_qty == null ? "—" : j14_qty(row.supplier_invoice_qty),
         row.commercial_variance_qty == null ? "—" : j14_qty(row.commercial_variance_qty),
         j19_decision_html(row.commercial_decision_code, row.commercial_review_permitted),
         j19_persisted_classification_html(row.persisted_classification),
         invoice_evidence(row.matched_invoice_rows),
+        j19_decision_actions_html(row, "Finished Item", index),
     ]);
-    const component_rows = (report.components || []).map(row => [
+    const component_rows = (report.components || []).map((row, index) => [
         j14_escape(row.component_item), j14_escape(row.stock_uom), j14_qty(row.physical_remaining_qty),
         j14_qty(row.applied_credit_qty), j14_qty(row.unaccounted_remaining_qty),
         j19_decision_html(row.commercial_decision_code, row.commercial_review_permitted),
         j19_persisted_classification_html(row.persisted_classification),
+        j19_decision_actions_html(row, "Raw Material", index),
     ]);
     const policy = (report.policy_issues || []).map(code =>
         `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
@@ -571,14 +595,84 @@ function build_j19_commercial_panel(report) {
     return `<div data-j19-commercial-preview style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
         <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("Component commercial preview"))}</div>
         <div style="margin-bottom:8px">${j19_decision_html(report.commercial_decision_code, report.commercial_review_permitted)}</div>
-        <p class="text-muted">${j14_escape(__("Read-only preview. No commercial document or lot closure is authorised."))}</p>
+        <p class="text-muted">${j14_escape(report.commercial_decision_entry_enabled
+            ? __("Controlled decision entry only. No commercial document or lot closure is authorised.")
+            : __("Read-only preview. No commercial document or lot closure is authorised."))}</p>
         ${policy_readiness}
-        ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Evidence", "Persisted Classification", "Invoice Evidence"], finished_rows)}
-        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Evidence", "Persisted Classification"], component_rows)}
+        ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Evidence", "Persisted Classification", "Invoice Evidence", "Decision"], finished_rows)}
+        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Evidence", "Persisted Classification", "Decision"], component_rows)}
         ${policy ? `<div>${j14_badge(__("Settlement policy requires review"), "amber")}<ul>${policy}</ul></div>` : ""}
         ${classification_issues ? `<div>${j14_badge(__("Persisted classification requires review"), "amber")}<ul>${classification_issues}</ul></div>` : ""}
         ${legacy ? `<div>${j14_badge(__("Legacy commercial evidence"), "amber")}<ul>${legacy}</ul></div>` : ""}
     </div>`;
+}
+
+function j19_bind_decision_actions(frm, wrapper) {
+    const buttons = wrapper?.find?.("[data-j19-decision]");
+    buttons?.off?.("click.j19b1d").on?.("click.j19b1d", function () {
+        const button = this;
+        const report = frm.__j19_commercial_report || {};
+        const scope_type = button.dataset.j19Scope;
+        const rows = scope_type === "Raw Material" ? report.components : report.finished_items;
+        const row = (rows || [])[Number(button.dataset.j19Index)];
+        if (!row) return;
+        j19_open_decision_dialog(frm, row, scope_type, button.dataset.j19Decision, button);
+    });
+}
+
+function j19_open_decision_dialog(frm, row, scope_type, action, button) {
+    const capability = row.decision_capability || {};
+    const persisted = row.persisted_classification || {};
+    const choices = action === "treatment"
+        ? capability.allowed_treatments : capability.allowed_classifications;
+    if (!choices?.length) return;
+    const label = action === "treatment" ? __("Treatment") : __("Classification");
+    frappe.prompt([
+        {fieldtype: "HTML", fieldname: "evidence", options:
+            `<p><strong>${j14_escape(scope_type)}</strong> · ${j14_escape(
+                row.component_item || row.finished_item)} · ${j14_escape(row.stock_uom)}</p>
+             <p>${j14_escape(__("Direction"))}: ${j14_escape(capability.variance_direction)}</p>
+             <p class="text-muted">${j14_escape(__(
+                 "This records an auditable decision only. It creates no commercial, stock, or accounting document and does not authorise lot closure."))}</p>`},
+        {fieldtype: "Select", fieldname: "decision_value", label, reqd: 1,
+            options: choices.map(choice => choice.label).join("\n")},
+        {fieldtype: "Small Text", fieldname: "reason", label: __("Decision Reason"), reqd: 1},
+    ], async values => {
+        if (button.disabled) return;
+        button.disabled = true;
+        const identity = scope_type === "Raw Material" ? {
+            sco_supplied_item: row.sco_supplied_item,
+            sco_finished_item: row.sco_finished_item,
+            component_item: row.component_item,
+            stock_uom: row.stock_uom,
+        } : {
+            sco_finished_item: row.sco_finished_item,
+            purchase_order_item: row.purchase_order_item,
+        };
+        try {
+            await frappe.call({
+                method: "subcontracting_extensions.material_reconciliation_ui.record_commercial_decision",
+                args: {
+                    processor_lot: frm.doc.name,
+                    scope_type,
+                    scope_identity: identity,
+                    event_type: action === "treatment" ? "Treatment" : "Classification",
+                    variance_direction: capability.variance_direction,
+                    decision_value: (choices.find(choice =>
+                        choice.label === values.decision_value) || {}).value,
+                    reason: values.reason,
+                    expected_classification_revision: persisted.classification_revision || 0,
+                    expected_treatment_revision: persisted.treatment_revision || 0,
+                    expected_last_decision_event: persisted.last_decision_event || null,
+                },
+                freeze: true,
+                freeze_message: __("Recording commercial decision"),
+            });
+            await render_j14_material_panel(frm);
+        } finally {
+            button.disabled = false;
+        }
+    }, __("Record Controlled Commercial Decision"), __("Record Decision"));
 }
 
 const J16_DETAIL_SECTIONS = ["processor_settlement_policy_section", "settlement_policy_override_section", "settlement_details_section",
@@ -695,6 +789,7 @@ function render_j16_operational_guidance(frm) {
         </label>
     </div>`);
     j18_bind_component_return_actions(frm, field.$wrapper);
+    j19_bind_decision_actions(frm, field.$wrapper);
     j16_apply_view(frm, detailed);
     const toggle = field.$wrapper.find?.("[data-j16-detailed]");
     toggle?.off?.("change.j16").on?.("change.j16", function () {

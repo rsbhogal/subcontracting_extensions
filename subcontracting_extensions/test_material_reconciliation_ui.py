@@ -64,6 +64,10 @@ class TestMaterialReconciliationUI(unittest.TestCase):
             "commercial_reader_version": "J19A2",
             "commercial_document_authorized": False,
         })
+        self.module.attach_decision_capabilities = Mock(
+            side_effect=lambda api, report, enabled: dict(
+                report, commercial_decision_entry_enabled=enabled)
+        )
 
     def test_disabled_by_default_without_evidence_reads(self):
         self.assertEqual(self.module.get_material_panel("LOT"), {"enabled": False})
@@ -176,13 +180,14 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         })
         result = self.module.record_commercial_decision(
             "LOT", "Finished Item", identity, "Classification", "Shortage",
-            "PROCESSOR_RESPONSIBLE", "Reviewed evidence")
+            "PROCESSOR_RESPONSIBLE", "Reviewed evidence", 2, 1, "PLCD-00003")
         args = self.module.persist_commercial_decision.call_args.args
         self.assertIs(args[0], self.frappe)
         self.assertIs(args[1], self.module.get_component_commercial_preview)
         self.assertEqual(args[2], "LOT")
         self.assertEqual(args[4], {"sco_finished_item": "FG-A",
                                    "purchase_order_item": "PO-A"})
+        self.assertEqual(args[-3:], (2, 1, "PLCD-00003"))
         self.assertFalse(result["commercial_document_authorized"])
         self.assertFalse(result["lot_closure_authorized"])
 
@@ -203,6 +208,14 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.module.get_component_commercial_preview.assert_called_once_with("LOT")
         self.assertTrue(result["enabled"])
         self.assertFalse(result["commercial_document_authorized"])
+        self.assertFalse(result["commercial_decision_entry_enabled"])
+
+    def test_classification_flag_enables_only_decision_entry_capabilities(self):
+        self.frappe.conf.update(v2_component_commercial_preview=1,
+                                v2_component_commercial_classification=1)
+        result = self.module.get_commercial_preview_panel("LOT")
+        self.assertTrue(result["commercial_decision_entry_enabled"])
+        self.assertTrue(self.module.attach_decision_capabilities.call_args.kwargs["enabled"])
 
     def check_single_item_routing(self, enabled):
         spec = importlib.util.spec_from_file_location("j14_position_under_test",

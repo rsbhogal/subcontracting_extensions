@@ -9,6 +9,8 @@ from subcontracting_extensions.commercial_classification_policy import (
     FINISHED_ITEM,
     RAW_MATERIAL,
     canonical_scope,
+    allowed_classifications_for_evidence,
+    derive_variance_direction,
     make_scope_key,
     validate_classification_for_evidence,
     validate_reason,
@@ -27,6 +29,9 @@ def record_commercial_decision(
     variance_direction,
     decision_value,
     reason,
+    expected_classification_revision=0,
+    expected_treatment_revision=0,
+    expected_last_decision_event=None,
 ):
     """Append exactly one classification or treatment event in the caller transaction."""
     from frappe.utils import now_datetime
@@ -46,6 +51,8 @@ def record_commercial_decision(
 
     lot = api.get_doc("Processor Lot", processor_lot)
     lot.check_permission("write")
+    if lot.get("docstatus") == 2 or lot.get("settlement_status") in ("Completed", "Cancelled"):
+        raise ValueError("Commercial decisions cannot be changed on a completed or cancelled Processor Lot")
     sco = api.get_doc("Subcontracting Order", report.get("subcontracting_order"))
     po = api.get_doc("Purchase Order", sco.get("purchase_order"))
     scope.update(
@@ -60,6 +67,17 @@ def record_commercial_decision(
     _lock_scope(api, classification_doc.name)
     classification_doc = api.get_doc(
         "Processor Lot Commercial Classification", classification_doc.name
+    )
+
+    authoritative_direction = derive_variance_direction(row.get("commercial_decision_code"))
+    if variance_direction and variance_direction != authoritative_direction:
+        raise ValueError("Commercial variance direction changed; reload the Processor Lot")
+    variance_direction = authoritative_direction
+    _validate_expected_revision(
+        classification_doc,
+        expected_classification_revision,
+        expected_treatment_revision,
+        expected_last_decision_event,
     )
 
     if event_type == "Classification":
@@ -157,6 +175,79 @@ def record_commercial_decision(
         "commercial_document_authorized": False,
         "lot_closure_authorized": False,
     }
+
+
+def attach_decision_capabilities(api, report, *, enabled):
+    """Attach server-owned J19B1D choices; never authorise execution."""
+    result = report
+    lot = api.get_doc("Processor Lot", result.get("processor_lot"))
+    can_write = bool(lot.has_permission("write"))
+    active = lot.get("docstatus") != 2 and lot.get("settlement_status") not in ("Completed", "Cancelled")
+    rows = api.get_single("Subcontracting Settlement Settings").get("allowed_settlement_methods") or []
+    roles = set(api.get_roles())
+    for scope_type, target in ((RAW_MATERIAL, result.get("components") or []),
+                               (FINISHED_ITEM, result.get("finished_items") or [])):
+        for row in target:
+            available = bool(enabled and can_write and active
+                             and result.get("commercial_review_permitted") is True
+                             and row.get("commercial_review_permitted") is True
+                             and not result.get("policy_issues")
+                             and not result.get("classification_issues"))
+            capability = {
+                "scope_type": scope_type,
+                "classification_entry_available": available,
+                "treatment_selection_available": False,
+                "allowed_classifications": [],
+                "allowed_treatments": [],
+                "commercial_document_authorized": False,
+                "lot_closure_authorized": False,
+            }
+            if available:
+                try:
+                    direction = derive_variance_direction(row.get("commercial_decision_code"))
+                    capability["variance_direction"] = direction
+                    capability["allowed_classifications"] = allowed_classifications_for_evidence(
+                        row.get("commercial_decision_code")
+                    )
+                    persisted = row.get("persisted_classification") or {}
+                    classification = persisted.get("classification")
+                    if classification and persisted.get("variance_direction") == direction:
+                        for method in rows:
+                            try:
+                                contract = get_method_contract(rows, method.get("method_code"), direction)
+                                validate_treatment(direction, classification, contract["method_code"])
+                                _validate_method_counterparty(api, lot, contract)
+                            except (ValueError, TypeError):
+                                continue
+                            role = contract.get("approval_role")
+                            if role and role not in roles:
+                                continue
+                            capability["allowed_treatments"].append({
+                                "value": contract["method_code"],
+                                "label": contract["method_label"],
+                            })
+                        capability["treatment_selection_available"] = bool(
+                            capability["allowed_treatments"]
+                        )
+                except ValueError:
+                    capability["classification_entry_available"] = False
+            row["decision_capability"] = capability
+    result["commercial_decision_entry_enabled"] = bool(enabled and can_write and active)
+    return result
+
+
+def _validate_expected_revision(doc, classification_revision, treatment_revision, last_event):
+    try:
+        expected_classification = int(classification_revision or 0)
+        expected_treatment = int(treatment_revision or 0)
+    except (TypeError, ValueError):
+        raise ValueError("Expected commercial decision revisions must be integers")
+    if (
+        int(doc.get("classification_revision") or 0) != expected_classification
+        or int(doc.get("treatment_revision") or 0) != expected_treatment
+        or (doc.get("last_decision_event") or None) != (last_event or None)
+    ):
+        raise ValueError("Commercial decision changed since this screen was loaded; reload and review it")
 
 
 def _resolve_exact_scope(report, processor_lot, scope_type, identity):

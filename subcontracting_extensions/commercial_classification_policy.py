@@ -30,6 +30,28 @@ CLASSIFICATIONS = {
     },
 }
 
+# J19B1D currently has authoritative evidence only for shortage-side review.
+# Excess choices remain unavailable until a reader supplies an exact excess fact.
+DIRECTION_BY_EVIDENCE_CODE = {
+    "NO_RAW_MATERIAL_RECOVERY": SHORTAGE,
+    "RAW_MATERIAL_CREDIT_ACCOUNTED": SHORTAGE,
+    "NO_PROCESSING_RECOVERY": SHORTAGE,
+    "PROCESSING_RECOVERY_POLICY_DISABLED": SHORTAGE,
+    "PROCESSING_RECOVERY_RECOMMENDED": SHORTAGE,
+}
+
+CLASSIFICATION_LABELS = {
+    "PENDING_INVESTIGATION": "Pending Investigation",
+    "PROCESSOR_RESPONSIBLE": "Processor Responsible",
+    "COMPANY_RESPONSIBLE": "Company Responsible",
+    "DISPUTED": "Disputed",
+    "NO_COMMERCIAL_ACTION_REQUIRED": "No Commercial Action Required",
+    "PENDING_OWNERSHIP_INVESTIGATION": "Pending Ownership Investigation",
+    "COMPANY_OWNED": "Company Owned",
+    "SUPPLIER_OWNED": "Supplier Owned",
+    "MIXED_OR_UNRESOLVED": "Mixed or Unresolved",
+}
+
 UNRESOLVED_EXCESS = {
     "PENDING_OWNERSHIP_INVESTIGATION",
     "MIXED_OR_UNRESOLVED",
@@ -157,6 +179,28 @@ def validate_reason(reason):
     if not value:
         raise CommercialClassificationError("A decision reason is required")
     return value
+
+
+def derive_variance_direction(evidence_code):
+    """Return only a direction proven by the authoritative preview evidence."""
+    direction = DIRECTION_BY_EVIDENCE_CODE.get(evidence_code)
+    if not direction:
+        raise CommercialClassificationError(
+            f"Evidence {evidence_code or '(blank)'} does not prove a commercial variance direction"
+        )
+    return direction
+
+
+def allowed_classifications_for_evidence(evidence_code):
+    """Return ordered server-owned classification choices for one evidence row."""
+    direction = derive_variance_direction(evidence_code)
+    values = CLASSIFICATIONS[direction]
+    if evidence_code in NO_ACTION_EVIDENCE_CODES:
+        values = {"NO_COMMERCIAL_ACTION_REQUIRED"}
+    return [
+        {"value": value, "label": CLASSIFICATION_LABELS[value]}
+        for value in CLASSIFICATION_LABELS if value in values
+    ]
 
 
 def _required(row, field):
