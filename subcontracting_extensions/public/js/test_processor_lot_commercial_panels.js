@@ -60,6 +60,12 @@ function commercial() {
         components: [
             {sco_supplied_item: "RM-KG", component_item: "Wire <unsafe>", stock_uom: "Kg",
                 physical_remaining_qty: 0, applied_credit_qty: 0, unaccounted_remaining_qty: 0,
+                suggested_recovery_rate: 41.2,
+                suggested_recovery_rate_basis: "Material <cost> only",
+                commercial_execution_readiness_code: "DEFINE_COMMERCIAL_RECOVERY_QUANTITY",
+                dispatch_cost_issues: [], dispatch_cost_evidence: [{stock_entry: 'STE/a?"<>',
+                    stock_entry_item: "SED<1>", stock_qty: 500, stock_uom: "Kg",
+                    dispatch_basic_rate: 41.2}],
                 commercial_decision_code: "NO_RAW_MATERIAL_RECOVERY", commercial_review_permitted: true,
                 persisted_classification: {classification: "PROCESSOR_RESPONSIBLE",
                     selected_treatment_method: "COMMERCIAL_WAIVER", classification_revision: 2,
@@ -95,6 +101,12 @@ function commercial() {
     assert(html.includes("Persisted Classification") && html.includes("PROCESSOR_RESPONSIBLE"));
     assert(html.includes("COMMERCIAL_WAIVER") && html.includes("auditor&lt;unsafe&gt;"));
     assert(html.includes("Approved &lt;reason&gt;") && !html.includes("Approved <reason>"));
+    assert(html.includes("Dispatch Cost Evidence") && html.includes("Suggested material-content rate"));
+    assert(html.includes("41.200") && html.includes("Define an authoritative commercial recovery quantity"));
+    assert(html.includes("/app/stock-entry/STE%2Fa%3F%22%3C%3E"));
+    assert(html.includes("SED&lt;1&gt;") && !html.includes("SED<1>"));
+    assert(html.includes("Material &lt;cost&gt; only") && !html.includes("Material <cost> only"));
+    assert(html.includes("does not define a recovery quantity"));
     assert(!html.includes("Create Debit Note") && !html.includes("<button"));
 
     report.commercial_decision_entry_enabled = true;

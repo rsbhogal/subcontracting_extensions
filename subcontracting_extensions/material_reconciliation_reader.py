@@ -83,11 +83,20 @@ def _read_material_position(api, processor_lot):
                 issue("MOVEMENT_RETURN_FLAG_MISMATCH")
             movements.append(dict(
                 name=row.get("name"), parent=doc.name, docstatus=doc.docstatus,
+                posting_date=doc.get("posting_date"), posting_time=doc.get("posting_time"),
+                purpose=doc.get("purpose"), is_return=bool(doc.get("is_return")),
                 subcontracting_order=doc.get("subcontracting_order"),
                 company=doc.get("company"), supplier=doc.get("supplier"),
                 item_code=row.get("item_code"), stock_uom=row.get("stock_uom"),
                 stock_qty=row.get("transfer_qty"), sco_rm_detail=row.get("sco_rm_detail"),
+                basic_rate=row.get("basic_rate"), basic_amount=row.get("basic_amount"),
+                valuation_rate=row.get("valuation_rate"),
                 s_warehouse=source, t_warehouse=target,
+                movement_direction=(
+                    "Return from Subcontractor" if returning
+                    else "Send to Subcontractor" if sending
+                    else "Unsupported"
+                ),
             ))
 
     scr_names = child_parents("Subcontracting Receipt Item", "Subcontracting Receipt", "items",

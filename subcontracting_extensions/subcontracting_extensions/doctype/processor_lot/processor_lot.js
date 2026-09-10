@@ -499,6 +499,19 @@ function j19_decision_label(code) {
         BROKEN_COMMERCIAL_DECISION_SUPERSESSION: "Broken commercial decision history",
         COMMERCIAL_CLASSIFICATION_PROJECTION_MISMATCH: "Commercial classification state mismatch",
         COMMERCIAL_DECISION_POLICY_SNAPSHOT_STALE: "Decision-time policy differs from current policy",
+        REVIEW_DISPATCH_COST_EVIDENCE: "Review historical dispatch-cost evidence",
+        PERSIST_COMMERCIAL_CLASSIFICATION: "Persist commercial classification",
+        DEFINE_MATERIAL_DISPOSITION: "Define material disposition before commercial classification",
+        NO_COMMERCIAL_EXECUTION_REQUIRED: "No commercial execution required",
+        SELECT_COMMERCIAL_TREATMENT: "Select commercial treatment",
+        DEFINE_COMMERCIAL_RECOVERY_QUANTITY: "Define an authoritative commercial recovery quantity",
+        SELECTED_TREATMENT_NOT_EXECUTABLE_IN_J19B2A: "Selected treatment is not executable in this checkpoint",
+        NO_EXACT_DISPATCH_COST_EVIDENCE: "No exact dispatch-cost evidence",
+        DISPATCH_COST_IDENTITY_MISMATCH: "Dispatch-cost identity mismatch",
+        DISPATCH_COST_QUANTITY_INVALID: "Invalid dispatch-cost quantity",
+        DISPATCH_COST_RATE_INVALID: "Invalid dispatch-cost rate",
+        DISPATCH_COST_AMOUNT_MISMATCH: "Dispatch-cost amount mismatch",
+        DISPATCH_COST_EVIDENCE_INVALID: "Invalid dispatch-cost evidence",
     };
     return __(labels[code] || code || "Commercial evidence requires review");
 }
@@ -603,6 +616,25 @@ function build_j19_commercial_panel(report, detailed = false) {
     const invoice_evidence = rows => (rows || []).map(row =>
         `${j14_link("Purchase Invoice", row.purchase_invoice)} / ${j14_escape(row.purchase_invoice_item || "—")}`
     ).join("<br>") || j14_escape(__("Not created"));
+    const dispatch_cost_evidence = row => {
+        const evidence = (row.dispatch_cost_evidence || []).map(source =>
+            `${j14_link("Stock Entry", source.stock_entry)} / ${j14_escape(source.stock_entry_item || "—")}`
+            + ` · ${j14_qty(source.stock_qty)} ${j14_escape(source.stock_uom)}`
+            + ` @ ${j14_qty(source.dispatch_basic_rate)}`
+        ).join("<br>");
+        const issues = (row.dispatch_cost_issues || []).map(code =>
+            j14_escape(j19_decision_label(code))).join("<br>");
+        const suggested = row.suggested_recovery_rate == null
+            ? j14_badge(__("Rate unavailable"), "amber")
+            : `${j14_badge(__("Suggested material-content rate"), "blue")} ${j14_qty(row.suggested_recovery_rate)}`;
+        return `<div>${suggested}</div>
+            ${evidence ? `<div class="text-muted" style="margin-top:5px">${evidence}</div>` : ""}
+            ${issues ? `<div class="text-muted" style="margin-top:5px">${issues}</div>` : ""}
+            ${row.suggested_recovery_rate_basis ? `<div class="text-muted" style="margin-top:5px">${j14_escape(
+                row.suggested_recovery_rate_basis)}</div>` : ""}
+            <div class="text-muted" style="margin-top:5px">${j14_escape(
+                j19_decision_label(row.commercial_execution_readiness_code))}</div>`;
+    };
     const finished_rows = (report.finished_items || []).map((row, index) => [
         j14_escape(row.finished_item), j14_escape(row.stock_uom), j14_qty(row.company_accepted_qty),
         row.supplier_invoice_qty == null ? "—" : j14_qty(row.supplier_invoice_qty),
@@ -617,6 +649,7 @@ function build_j19_commercial_panel(report, detailed = false) {
         j14_qty(row.applied_credit_qty), j14_qty(row.unaccounted_remaining_qty),
         j19_decision_html(row.commercial_decision_code, row.commercial_review_permitted),
         j19_persisted_classification_html(row.persisted_classification),
+        dispatch_cost_evidence(row),
         j19_decision_actions_html(row, "Raw Material", index),
     ]);
     const policy = (report.policy_issues || []).map(code =>
@@ -646,7 +679,9 @@ function build_j19_commercial_panel(report, detailed = false) {
             : __("Read-only preview. No commercial document or lot closure is authorised."))}</p>
         ${policy_readiness}
         ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Evidence", "Persisted Classification", "Invoice Evidence", "Decision"], finished_rows)}
-        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Evidence", "Persisted Classification", "Decision"], component_rows)}
+        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Evidence", "Persisted Classification", "Dispatch Cost Evidence", "Decision"], component_rows)}
+        <p class="text-muted">${j14_escape(__(
+            "J19B2A suggests the material-content rate from exact historical dispatch cost. It excludes ABC processing and consumable costs, does not define a recovery quantity, and authorises neither a document nor lot closure."))}</p>
         ${policy ? `<div>${j14_badge(__("Settlement policy requires review"), "amber")}<ul>${policy}</ul></div>` : ""}
         ${classification_issues ? `<div>${j14_badge(__("Persisted classification requires review"), "amber")}<ul>${classification_issues}</ul></div>` : ""}
         ${legacy ? `<div>${j14_badge(__("Legacy commercial evidence"), "amber")}<ul>${legacy}</ul></div>` : ""}

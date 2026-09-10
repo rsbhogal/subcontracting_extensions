@@ -87,7 +87,14 @@ class TestComponentCommercialReader(unittest.TestCase):
             items=[Doc(name="PI-A", po_detail="PO-A", stock_qty=10, stock_uom="Kg",
                 rate=2.5, net_rate=2.5, net_amount=25)])
         self.material = dict(processor_lot="LOT", subcontracting_order="SCO",
-            components=[component()])
+            components=[component()], movements=[dict(
+                name="SED-A", parent="STE-A", docstatus=1, is_return=False,
+                purpose="Send to Subcontractor", movement_direction="Send to Subcontractor",
+                evidence_role="Physical transfer or return", subcontracting_order="SCO",
+                company="Company", supplier="Supplier", sco_rm_detail="RM-A",
+                item_code="RM ITEM A", stock_uom="Kg", stock_qty=10,
+                basic_rate=4, basic_amount=40, s_warehouse="Factory",
+                t_warehouse="Processor")])
         self.completion = dict(items=[Doc(subcontracting_order_item="FG-A",
             submitted_scr_qty=10, journey_complete=True, issues=[])], journeys=[Doc(
                 pi_verified=True, purchase_invoice="PI", pi_detail="PI-A")])
@@ -104,6 +111,9 @@ class TestComponentCommercialReader(unittest.TestCase):
             "COMMERCIAL_REVIEW_COMPLETE_NO_RECOVERY")
         self.assertEqual(result["finished_items"][0]["matched_invoice_rows"][0][
             "purchase_invoice_item"], "PI-A")
+        self.assertEqual(result["commercial_execution_preview_contract_version"], "J19B2A")
+        self.assertEqual(result["components"][0]["suggested_recovery_rate"], 4)
+        self.assertFalse(result["components"][0]["commercial_execution_ready"])
 
     def test_safe_method_defaults_are_reported_ready_without_customer(self):
         result = self.read()

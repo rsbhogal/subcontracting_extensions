@@ -6,6 +6,9 @@ import json
 from subcontracting_extensions.component_commercial_preview import (
     build_component_commercial_preview,
 )
+from subcontracting_extensions.component_commercial_execution_preview import (
+    attach_commercial_execution_preview,
+)
 from subcontracting_extensions.material_reconciliation_reader import (
     get_material_position,
 )
@@ -92,6 +95,16 @@ def _read_component_commercial_preview(
         },
     )
     classification_issues = _attach_persisted_classifications(api, lot, result, policy)
+    result = attach_commercial_execution_preview(
+        result,
+        material.get("movements") or [],
+        {
+            "subcontracting_order": sco.name,
+            "company": sco.get("company"),
+            "supplier": sco.get("supplier"),
+            "supplier_warehouse": sco.get("supplier_warehouse"),
+        },
+    )
     if classification_issues:
         result["commercial_review_permitted"] = False
         result["commercial_decision_code"] = "REVIEW_PERSISTED_COMMERCIAL_CLASSIFICATION"

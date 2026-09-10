@@ -88,6 +88,7 @@ class TestMaterialReconciliationReader(unittest.TestCase):
         self.api.add("Stock Entry", "STE-" + key, subcontracting_order="SCO", is_return=0,
             purpose="Send to Subcontractor", items=[Doc(name="SED-" + key, sco_rm_detail="RM-" + key,
                 item_code=item, stock_uom=uom, transfer_qty=qty, qty=qty / 1000,
+                basic_rate=12.5, basic_amount=qty * 12.5, valuation_rate=12.5,
                 s_warehouse="Factory", t_warehouse="Processor")], **self.header)
         self.scr["items"].append(Doc(name="SCR-" + key, subcontracting_order="SCO",
             subcontracting_order_item="FG-" + key, item_code="Finished-" + key))
@@ -121,6 +122,11 @@ class TestMaterialReconciliationReader(unittest.TestCase):
         self.assertEqual([r["transferred_qty"] for r in report["components"]], [500, 100])
         self.assertNotIn("total_qty", report)
         self.assertFalse(report["settlement_enabled"])
+        evidence = report["movements"][0]
+        self.assertEqual(evidence["movement_direction"], "Send to Subcontractor")
+        self.assertEqual(evidence["purpose"], "Send to Subcontractor")
+        self.assertEqual(evidence["basic_rate"], 12.5)
+        self.assertEqual(evidence["basic_amount"], 6250)
 
     def test_return_counted_once_despite_net_native_field(self):
         self.return_material()
