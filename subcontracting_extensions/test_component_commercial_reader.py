@@ -306,7 +306,7 @@ class TestComponentCommercialReader(unittest.TestCase):
         self.assertEqual(evidence["decision_events"][0]["reason"], "Verified")
         self.assertFalse(evidence["commercial_document_authorized"])
 
-    def test_stale_decision_policy_fails_closed(self):
+    def test_classification_is_not_invalidated_by_settlement_policy_change(self):
         scope_key = make_scope_key(dict(scope_type="Finished Item", processor_lot="LOT",
             sco_finished_item="FG-A", purchase_order_item="PO-A"))
         classification = self.api.add("Processor Lot Commercial Classification", "PLCC-2",
@@ -322,11 +322,49 @@ class TestComponentCommercialReader(unittest.TestCase):
             policy_snapshot="{}", commercial_document_authorized=0,
             lot_closure_authorized=0)
         result = self.read()
-        self.assertIn("COMMERCIAL_DECISION_POLICY_SNAPSHOT_STALE",
+        self.assertNotIn("COMMERCIAL_DECISION_POLICY_SNAPSHOT_STALE",
+                         result["classification_issues"])
+        self.assertIn("INCOMPLETE_COMMERCIAL_DECISION_AUDIT",
                       result["classification_issues"])
         self.assertEqual(result["commercial_decision_code"],
                          "REVIEW_PERSISTED_COMMERCIAL_CLASSIFICATION")
         self.assertFalse(result["commercial_document_authorized"])
+
+    def test_selected_treatment_is_invalidated_by_settlement_policy_change(self):
+        scope_key = make_scope_key(dict(scope_type="Raw Material", processor_lot="LOT",
+            sco_supplied_item="RM-A", sco_finished_item="FG-A",
+            component_item="RM ITEM A", stock_uom="Kg"))
+        classification = self.api.add(
+            "Processor Lot Commercial Classification", "PLCC-3",
+            processor_lot="LOT", scope_type="Raw Material", scope_key=scope_key,
+            sco_supplied_item="RM-A", sco_finished_item="FG-A",
+            component_item="RM ITEM A", stock_uom="Kg", purchase_order_item=None,
+            current_variance_direction="Shortage",
+            current_classification="PROCESSOR_RESPONSIBLE",
+            current_treatment_method="SALES_INVOICE", classification_revision=1,
+            treatment_revision=1, last_decision_event="PLCD-4",
+            last_decision_by="user@example.com", last_decision_at="2026-09-09 11:00:00",
+        )
+        policy = self.read()["settlement_policy"]
+        common = dict(commercial_classification=classification.name,
+            scope_key=scope_key, variance_direction="Shortage",
+            decision_by="user@example.com", commercial_document_authorized=0,
+            lot_closure_authorized=0)
+        self.api.add("Processor Lot Commercial Decision Event", "PLCD-3",
+            event_sequence=1, event_key=make_event_key(scope_key, 1),
+            event_type="Classification", supersedes_event=None,
+            classification="PROCESSOR_RESPONSIBLE", selected_treatment_method=None,
+            reason="Responsibility reviewed", decision_at="2026-09-09 10:00:00",
+            policy_snapshot=json.dumps(policy, sort_keys=True, separators=(",", ":")),
+            **common)
+        self.api.add("Processor Lot Commercial Decision Event", "PLCD-4",
+            event_sequence=2, event_key=make_event_key(scope_key, 2),
+            event_type="Treatment", supersedes_event=None, classification=None,
+            selected_treatment_method="SALES_INVOICE", reason="Treatment selected",
+            decision_at="2026-09-09 11:00:00", policy_snapshot="{}", **common)
+        result = self.read()
+        self.assertIn("COMMERCIAL_DECISION_POLICY_SNAPSHOT_STALE",
+                      result["classification_issues"])
 
     def test_supplied_inputs_are_not_mutated(self):
         before = deepcopy((self.material, self.completion))

@@ -8,6 +8,7 @@ from subcontracting_extensions.commercial_classification_policy import (
     EXCESS,
     FINISHED_ITEM,
     RAW_MATERIAL,
+    RETAINED_MATERIAL_EVIDENCE,
     canonical_scope,
     allowed_classifications_for_evidence,
     derive_variance_direction,
@@ -40,14 +41,13 @@ def record_commercial_decision(
     report = read_preview(processor_lot)
     if report.get("processor_lot") != processor_lot:
         raise ValueError("Commercial preview returned the wrong Processor Lot")
-    if report.get("commercial_review_permitted") is not True:
-        raise ValueError("Commercial evidence is not ready for classification")
-    if report.get("policy_issues"):
-        raise ValueError("Settlement policy evidence requires review")
-
     row, scope = _resolve_exact_scope(report, processor_lot, scope_type, scope_identity)
-    if row.get("commercial_review_permitted") is not True:
+    evidence_code = row.get("commercial_decision_code")
+    if not _classification_entry_ready(report, row):
         raise ValueError("The exact commercial scope is not ready for classification")
+    _validate_event_stage(event_type, evidence_code)
+    if event_type == "Treatment" and report.get("policy_issues"):
+        raise ValueError("Settlement policy evidence requires review")
 
     lot = api.get_doc("Processor Lot", processor_lot)
     lot.check_permission("write")
@@ -188,11 +188,10 @@ def attach_decision_capabilities(api, report, *, enabled):
     for scope_type, target in ((RAW_MATERIAL, result.get("components") or []),
                                (FINISHED_ITEM, result.get("finished_items") or [])):
         for row in target:
-            available = bool(enabled and can_write and active
-                             and result.get("commercial_review_permitted") is True
-                             and row.get("commercial_review_permitted") is True
-                             and not result.get("policy_issues")
-                             and not result.get("classification_issues"))
+            available = bool(
+                enabled and can_write and active
+                and _classification_entry_ready(result, row)
+            )
             capability = {
                 "scope_type": scope_type,
                 "classification_entry_available": available,
@@ -211,7 +210,11 @@ def attach_decision_capabilities(api, report, *, enabled):
                     )
                     persisted = row.get("persisted_classification") or {}
                     classification = persisted.get("classification")
-                    if classification and persisted.get("variance_direction") == direction:
+                    if (
+                        row.get("commercial_decision_code") != RETAINED_MATERIAL_EVIDENCE
+                        and classification
+                        and persisted.get("variance_direction") == direction
+                    ):
                         for method in rows:
                             try:
                                 contract = get_method_contract(rows, method.get("method_code"), direction)
@@ -234,6 +237,29 @@ def attach_decision_capabilities(api, report, *, enabled):
             row["decision_capability"] = capability
     result["commercial_decision_entry_enabled"] = bool(enabled and can_write and active)
     return result
+
+
+def _classification_entry_ready(report, row):
+    """Permit exact retained-fact classification, never its treatment."""
+    if report.get("classification_issues") or report.get("material_disposition_issues"):
+        return False
+    if report.get("legacy_evidence") or report.get("existing_documents"):
+        return False
+    if row.get("commercial_decision_code") == RETAINED_MATERIAL_EVIDENCE:
+        return bool(
+            row.get("retained_material_classification_ready")
+            and row.get("commercial_review_permitted") is True
+        )
+    return bool(
+        report.get("commercial_review_permitted") is True
+        and row.get("commercial_review_permitted") is True
+        and not report.get("policy_issues")
+    )
+
+
+def _validate_event_stage(event_type, evidence_code):
+    if event_type == "Treatment" and evidence_code == RETAINED_MATERIAL_EVIDENCE:
+        raise ValueError("Retained-material treatment selection is deferred beyond J19B2C")
 
 
 def _validate_expected_revision(doc, classification_revision, treatment_revision, last_event):
@@ -346,13 +372,25 @@ def _latest_event(api, parent, event_type):
 def _evidence_snapshot(scope_type, row):
     fields = (
         ("sco_supplied_item", "sco_finished_item", "component_item", "stock_uom",
-         "physical_remaining_qty", "applied_credit_qty", "unaccounted_remaining_qty")
+         "physical_remaining_qty", "applied_credit_qty", "unaccounted_remaining_qty",
+         "suggested_recovery_quantity", "recovery_quantity_source",
+         "suggested_recovery_rate", "suggested_recovery_rate_source",
+         "suggested_recovery_amount")
         if scope_type == RAW_MATERIAL else
         ("sco_finished_item", "purchase_order_item", "finished_item", "stock_uom",
          "company_accepted_qty", "supplier_invoice_qty", "commercial_variance_qty",
          "processing_recovery_rate", "processing_recovery_amount")
     )
-    return {field: row.get(field) for field in fields}
+    snapshot = {field: row.get(field) for field in fields}
+    if scope_type == RAW_MATERIAL:
+        disposition = row.get("persisted_material_disposition") or {}
+        snapshot["material_disposition"] = {
+            field: disposition.get(field) for field in (
+                "name", "scope_key", "disposition", "disposition_qty",
+                "stock_uom", "disposition_revision", "last_disposition_event",
+            )
+        }
+    return snapshot
 
 
 def _json(value):

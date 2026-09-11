@@ -498,6 +498,10 @@ function j19_decision_label(code) {
         COMMERCIAL_DECISION_SCOPE_MISMATCH: "Commercial decision scope mismatch",
         COMMERCIAL_DECISION_UNSAFE_AUTHORIZATION: "Unsafe commercial decision authorization",
         BROKEN_COMMERCIAL_DECISION_SUPERSESSION: "Broken commercial decision history",
+        PROCESSOR_RESPONSIBLE: "Processor Responsible",
+        COMPANY_RESPONSIBLE: "Company Responsible",
+        DISPUTED: "Disputed",
+        NO_COMMERCIAL_ACTION_REQUIRED: "No Commercial Action Required",
         COMMERCIAL_CLASSIFICATION_PROJECTION_MISMATCH: "Commercial classification state mismatch",
         COMMERCIAL_DECISION_POLICY_SNAPSHOT_STALE: "Decision-time policy differs from current policy",
         REVIEW_DISPATCH_COST_EVIDENCE: "Review historical dispatch-cost evidence",
@@ -505,6 +509,8 @@ function j19_decision_label(code) {
         DEFINE_MATERIAL_DISPOSITION: "Define material disposition before commercial classification",
         PENDING_INVESTIGATION: "Pending investigation",
         RETAINED_BY_PROCESSOR: "Retained by processor",
+        RAW_MATERIAL_RETAINED_BY_PROCESSOR: "Raw material retained by processor",
+        COMMERCIAL_TREATMENT_DEFERRED_J19B2C: "Commercial treatment deferred beyond J19B2C",
         MATERIAL_DISPOSITION_QUANTITY_STALE: "Material disposition quantity is stale",
         NO_COMMERCIAL_EXECUTION_REQUIRED: "No commercial execution required",
         SELECT_COMMERCIAL_TREATMENT: "Select commercial treatment",
@@ -532,7 +538,11 @@ function j19_decision_html(code, permitted) {
 function j19_persisted_classification_html(evidence) {
     if (!evidence) return `<div>${j14_badge(__("Not classified"), "neutral")}</div>
         <div class="text-muted" style="margin-top:5px">${j14_escape(__("No persisted decision."))}</div>`;
-    const classification = j14_escape(evidence.classification || __("Not classified"));
+    const classification = j14_escape(
+        evidence.classification
+            ? j19_decision_label(evidence.classification)
+            : __("Not classified")
+    );
     const treatment = j14_escape(evidence.selected_treatment_method || __("Not selected"));
     const events = evidence.decision_events || [];
     const reason = events.length ? events[events.length - 1].reason : "";
@@ -550,9 +560,15 @@ function j19_decision_actions_html(row, scope_type, index) {
         return `<div>${j14_badge(__("Decision entry unavailable"), "neutral")}</div>`;
     }
     const persisted = row.persisted_classification || {};
-    const classification_label = persisted.classification
+    const classification_exists = Boolean(persisted.classification);
+    const classification_label = classification_exists
         ? __("Revise Classification") : __("Classify");
-    const classification = `<button type="button" class="btn btn-xs btn-default"
+    const classification_class = classification_exists ? "btn-default" : "btn-warning";
+    const classification_style = classification_exists
+        ? "background:#e2e6ea;border:1px solid #6c757d;color:#212529;font-weight:600;padding:3px 8px"
+        : "font-weight:600";
+    const classification = `<button type="button" class="btn btn-xs ${classification_class}"
+        style="${classification_style}"
         data-j19-decision="classification" data-j19-scope="${j14_escape(scope_type)}"
         data-j19-index="${index}">${j14_escape(classification_label)}</button>`;
     const treatment = capability.treatment_selection_available
@@ -598,8 +614,17 @@ function build_j19_commercial_summary(report) {
         const persisted = scope.row.persisted_classification || {};
         const capability = scope.row.decision_capability || {};
         const disposition = scope.row.material_disposition_capability || {};
-        return disposition.entry_available
+        const persisted_disposition = scope.row.persisted_material_disposition || {};
+        const disposition_requires_attention = disposition.entry_available
+            && persisted_disposition.disposition !== "RETAINED_BY_PROCESSOR";
+        const retained_classification_revision_available = Boolean(
+            persisted.classification
+            && capability.classification_entry_available
+            && scope.row.commercial_decision_code === "RAW_MATERIAL_RETAINED_BY_PROCESSOR"
+        );
+        return disposition_requires_attention
             || (!persisted.classification && capability.classification_entry_available)
+            || retained_classification_revision_available
             || (persisted.classification && capability.treatment_selection_available
                 && !persisted.selected_treatment_method);
     });
@@ -613,9 +638,11 @@ function build_j19_commercial_summary(report) {
             j14_escape(row.stock_uom),
             j14_escape(j19_decision_label(row.commercial_decision_code)),
             persisted.classification
-                ? j14_escape(persisted.classification)
+                ? j14_escape(j19_decision_label(persisted.classification))
                 : j14_badge(__("Not classified"), "neutral"),
-            scope.scope_type === "Raw Material" && row.material_disposition_capability?.entry_available
+            scope.scope_type === "Raw Material"
+                && row.material_disposition_capability?.entry_available
+                && row.persisted_material_disposition?.disposition !== "RETAINED_BY_PROCESSOR"
                 ? j19_material_disposition_html(row, scope.index)
                 : j19_decision_actions_html(row, scope.scope_type, scope.index),
         ];
@@ -627,7 +654,7 @@ function build_j19_commercial_summary(report) {
             !report.commercial_decision_entry_enabled
                 ? __("Decision entry is currently disabled.")
                 : pending.length
-                    ? __("Only scopes needing a decision are shown below.")
+                    ? __("Only scopes needing attention or allowing controlled revision are shown below.")
                     : __("No commercial decision currently requires attention."))}</p>
         ${(report.commercial_decision_entry_enabled || report.material_disposition_entry_enabled) && pending.length ? j14_table(
             ["Scope", "Item", "UOM", "Evidence", "Current Decision", "Action"], pending_rows
@@ -657,7 +684,14 @@ function build_j19_commercial_panel(report, detailed = false) {
         const suggested = row.suggested_recovery_rate == null
             ? j14_badge(__("Rate unavailable"), "amber")
             : `${j14_badge(__("Suggested material-content rate"), "blue")} ${j14_qty(row.suggested_recovery_rate)}`;
+        const recovery = row.suggested_recovery_quantity == null
+            ? ""
+            : `<div style="margin-top:5px"><strong>${j14_escape(__("Recovery quantity"))}:</strong>
+                ${j14_qty(row.suggested_recovery_quantity)} ${j14_escape(row.stock_uom)}
+                · <strong>${j14_escape(__("Suggested material amount"))}:</strong>
+                ${j14_qty(row.suggested_recovery_amount)}</div>`;
         return `<div>${suggested}</div>
+            ${recovery}
             ${evidence ? `<div class="text-muted" style="margin-top:5px">${evidence}</div>` : ""}
             ${issues ? `<div class="text-muted" style="margin-top:5px">${issues}</div>` : ""}
             ${row.suggested_recovery_rate_basis ? `<div class="text-muted" style="margin-top:5px">${j14_escape(
@@ -701,6 +735,11 @@ function build_j19_commercial_panel(report, detailed = false) {
         `<li>${j14_link(row.doctype, row.name)} — ${j14_escape(__(row.reason || "Legacy evidence"))}</li>`).join("");
     const classification_issues = (report.classification_issues || []).map(code =>
         `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
+    const retained_fact_present = (report.components || []).some(row =>
+        row.commercial_decision_code === "RAW_MATERIAL_RETAINED_BY_PROCESSOR");
+    const material_rate_note = retained_fact_present
+        ? __("J19B2C derives the exact recovery quantity from the current full-residual retained-material disposition and suggests its material-content amount from exact historical dispatch cost. It excludes ABC processing and consumable costs and authorises neither treatment, a document, nor lot closure.")
+        : __("J19B2A suggests the material-content rate from exact historical dispatch cost. It excludes ABC processing and consumable costs, does not define a recovery quantity, and authorises neither a document nor lot closure.");
     return `<div data-j19-commercial-preview style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
         <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("Component commercial preview"))}</div>
         <div style="margin-bottom:8px">${j19_decision_html(report.commercial_decision_code, report.commercial_review_permitted)}</div>
@@ -710,8 +749,7 @@ function build_j19_commercial_panel(report, detailed = false) {
         ${policy_readiness}
         ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Evidence", "Persisted Classification", "Invoice Evidence", "Decision"], finished_rows)}
         ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Evidence", "Disposition / Classification", "Dispatch Cost Evidence", "Decision"], component_rows)}
-        <p class="text-muted">${j14_escape(__(
-            "J19B2A suggests the material-content rate from exact historical dispatch cost. It excludes ABC processing and consumable costs, does not define a recovery quantity, and authorises neither a document nor lot closure."))}</p>
+        <p class="text-muted">${j14_escape(material_rate_note)}</p>
         ${policy ? `<div>${j14_badge(__("Settlement policy requires review"), "amber")}<ul>${policy}</ul></div>` : ""}
         ${classification_issues ? `<div>${j14_badge(__("Persisted classification requires review"), "amber")}<ul>${classification_issues}</ul></div>` : ""}
         ${legacy ? `<div>${j14_badge(__("Legacy commercial evidence"), "amber")}<ul>${legacy}</ul></div>` : ""}

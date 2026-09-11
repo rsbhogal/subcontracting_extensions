@@ -138,6 +138,27 @@ class TestCommercialClassificationPolicy(unittest.TestCase):
         self.assertIn("PROCESSOR_RESPONSIBLE", values)
         self.assertNotIn("COMPANY_OWNED", values)
 
+    def test_retained_material_proves_shortage_without_prejudging_responsibility(self):
+        self.assertEqual(
+            derive_variance_direction("RAW_MATERIAL_RETAINED_BY_PROCESSOR"),
+            "Shortage",
+        )
+        values = {row["value"] for row in allowed_classifications_for_evidence(
+            "RAW_MATERIAL_RETAINED_BY_PROCESSOR")}
+        self.assertEqual(values, {
+            "PROCESSOR_RESPONSIBLE", "COMPANY_RESPONSIBLE", "DISPUTED",
+            "NO_COMMERCIAL_ACTION_REQUIRED",
+        })
+        self.assertNotIn("PENDING_INVESTIGATION", values)
+
+    def test_retained_material_rejects_pending_classification(self):
+        with self.assertRaisesRegex(CommercialClassificationError, "retained material"):
+            validate_classification_for_evidence(
+                "RAW_MATERIAL_RETAINED_BY_PROCESSOR",
+                "Shortage",
+                "PENDING_INVESTIGATION",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

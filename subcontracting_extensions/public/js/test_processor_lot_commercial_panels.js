@@ -98,7 +98,8 @@ function commercial() {
     assert(html.includes("Drawn &lt;unsafe&gt;") && !html.includes("Drawn <unsafe>"));
     assert(html.includes("/app/purchase-invoice/PI%2Fa%3F%22%3C%3E"));
     assert(html.includes("ROW&lt;1&gt;") && !html.includes("ROW<1>"));
-    assert(html.includes("Persisted Classification") && html.includes("PROCESSOR_RESPONSIBLE"));
+    assert(html.includes("Persisted Classification") && html.includes("Processor Responsible"));
+    assert(!html.includes(">PROCESSOR_RESPONSIBLE<"));
     assert(html.includes("COMMERCIAL_WAIVER") && html.includes("auditor&lt;unsafe&gt;"));
     assert(html.includes("Approved &lt;reason&gt;") && !html.includes("Approved <reason>"));
     assert(html.includes("Dispatch Cost Evidence") && html.includes("Suggested material-content rate"));
@@ -146,6 +147,53 @@ function commercial() {
     report.components[1].material_disposition_capability = {entry_available: false,
         allowed_dispositions: []};
 
+    const retained = commercial();
+    retained.commercial_review_permitted = false;
+    retained.commercial_decision_entry_enabled = true;
+    retained.policy_issues = ["PROCESSOR_LOT_POLICY_DIFFERS_FROM_PURCHASE_ORDER"];
+    Object.assign(retained.components[1], {
+        physical_remaining_qty: 25, unaccounted_remaining_qty: 25,
+        commercial_decision_code: "RAW_MATERIAL_RETAINED_BY_PROCESSOR",
+        commercial_review_permitted: true,
+        suggested_recovery_rate: 41.2, suggested_recovery_quantity: 25,
+        suggested_recovery_amount: 1030,
+        commercial_execution_readiness_code: "PERSIST_COMMERCIAL_CLASSIFICATION",
+        persisted_material_disposition: {disposition: "RETAINED_BY_PROCESSOR",
+            disposition_qty: 25, stock_uom: "Units", disposition_revision: 1},
+        material_disposition_capability: {entry_available: true,
+            allowed_dispositions: [{value: "RETAINED_BY_PROCESSOR",
+                label: "Retained by Processor"}]},
+        decision_capability: {variance_direction: "Shortage",
+            classification_entry_available: true, treatment_selection_available: false,
+            allowed_classifications: [{value: "PROCESSOR_RESPONSIBLE",
+                label: "Processor Responsible"}], allowed_treatments: []},
+    });
+    html = context.build_j19_commercial_panel(retained, true);
+    assert(html.includes("Raw material retained by processor"));
+    assert(html.includes("Recovery quantity") && html.includes("1030.000"));
+    assert(html.includes("derives the exact recovery quantity"));
+    assert(html.includes("authorises neither treatment, a document, nor lot closure"));
+    assert(html.includes('data-j19-decision="classification"'));
+    assert(!html.includes('data-j19-decision="treatment"'));
+    html = context.build_j19_commercial_panel(retained);
+    assert(html.includes("Classify"));
+    assert(!html.includes("Revise Disposition"));
+    retained.components[1].persisted_classification = {
+        classification: "PROCESSOR_RESPONSIBLE", variance_direction: "Shortage",
+        classification_revision: 1, treatment_revision: 0,
+        selected_treatment_method: null,
+    };
+    retained.components[1].commercial_execution_readiness_code =
+        "COMMERCIAL_TREATMENT_DEFERRED_J19B2C";
+    html = context.build_j19_commercial_panel(retained);
+    assert(html.includes("Processor Responsible"));
+    assert(!html.includes("PROCESSOR_RESPONSIBLE"));
+    assert(html.includes("Revise Classification"));
+    assert(html.includes('class="btn btn-xs btn-default"'));
+    assert(html.includes("allowing controlled revision"));
+    assert(!html.includes("No commercial decision currently requires attention."));
+    assert(!html.includes("Select Treatment"));
+
     report.commercial_decision_entry_enabled = true;
     report.finished_items[0].decision_capability = {
         variance_direction: "Shortage", classification_entry_available: true,
@@ -156,6 +204,8 @@ function commercial() {
     html = context.build_j19_commercial_panel(report, true);
     assert(html.includes("Controlled decision entry only"));
     assert(html.includes("data-j19-decision=\"classification\""));
+    assert(html.includes('class="btn btn-xs btn-warning"'));
+    assert(html.includes('style="font-weight:600"'));
     assert(html.includes("Records a decision only"));
     assert(!html.includes("Create Debit Note"));
 
@@ -167,7 +217,7 @@ function commercial() {
     };
     html = context.build_j19_commercial_panel(report);
     assert(html.includes("Commercial decisions") && html.includes("1 of 4 scopes classified"));
-    assert(html.includes("Only scopes needing a decision are shown below."));
+    assert(html.includes("Only scopes needing attention or allowing controlled revision are shown below."));
     assert(html.includes("Cup") && html.includes("Classify"));
     assert(!html.includes("Policy Source") && !html.includes("Invoice Evidence"));
     assert(!html.includes("Approved &lt;reason&gt;"));
@@ -180,6 +230,13 @@ function commercial() {
         classification: "NO_COMMERCIAL_ACTION_REQUIRED", classification_revision: 1,
         treatment_revision: 0, selected_treatment_method: null,
     };
+    const revision_action = context.j19_decision_actions_html(
+        report.finished_items[0], "Finished Item", 0);
+    assert(revision_action.includes("Revise Classification"));
+    assert(revision_action.includes('class="btn btn-xs btn-default"'));
+    assert(revision_action.includes(
+        "background:#e2e6ea;border:1px solid #6c757d;color:#212529;font-weight:600;padding:3px 8px"));
+    assert(!revision_action.includes("btn-warning"));
     html = context.build_j19_commercial_panel(report);
     assert(html.includes("3 of 4 scopes classified"));
     assert(html.includes("No commercial decision currently requires attention."));

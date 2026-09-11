@@ -12,6 +12,13 @@ RAW_MATERIAL = "Raw Material"
 FINISHED_ITEM = "Finished Item"
 SHORTAGE = "Shortage"
 EXCESS = "Excess"
+RETAINED_MATERIAL_EVIDENCE = "RAW_MATERIAL_RETAINED_BY_PROCESSOR"
+RETAINED_MATERIAL_CLASSIFICATIONS = {
+    "PROCESSOR_RESPONSIBLE",
+    "COMPANY_RESPONSIBLE",
+    "DISPUTED",
+    "NO_COMMERCIAL_ACTION_REQUIRED",
+}
 
 CLASSIFICATIONS = {
     SHORTAGE: {
@@ -33,6 +40,7 @@ CLASSIFICATIONS = {
 # J19B1D currently has authoritative evidence only for shortage-side review.
 # Excess choices remain unavailable until a reader supplies an exact excess fact.
 DIRECTION_BY_EVIDENCE_CODE = {
+    RETAINED_MATERIAL_EVIDENCE: SHORTAGE,
     "NO_RAW_MATERIAL_RECOVERY": SHORTAGE,
     "RAW_MATERIAL_CREDIT_ACCOUNTED": SHORTAGE,
     "NO_PROCESSING_RECOVERY": SHORTAGE,
@@ -155,6 +163,13 @@ def validate_classification_for_evidence(evidence_code, direction, classificatio
         raise CommercialClassificationError(
             f"Evidence {evidence_code} permits only NO_COMMERCIAL_ACTION_REQUIRED"
         )
+    if (
+        evidence_code == RETAINED_MATERIAL_EVIDENCE
+        and classification not in RETAINED_MATERIAL_CLASSIFICATIONS
+    ):
+        raise CommercialClassificationError(
+            f"Classification {classification or '(blank)'} is not valid for retained material"
+        )
     return classification
 
 
@@ -197,6 +212,8 @@ def allowed_classifications_for_evidence(evidence_code):
     values = CLASSIFICATIONS[direction]
     if evidence_code in NO_ACTION_EVIDENCE_CODES:
         values = {"NO_COMMERCIAL_ACTION_REQUIRED"}
+    elif evidence_code == RETAINED_MATERIAL_EVIDENCE:
+        values = RETAINED_MATERIAL_CLASSIFICATIONS
     return [
         {"value": value, "label": CLASSIFICATION_LABELS[value]}
         for value in CLASSIFICATION_LABELS if value in values

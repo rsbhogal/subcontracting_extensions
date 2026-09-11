@@ -11,6 +11,9 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 
 CONTRACT_VERSION = "J19B2A"
+RETAINED_FACT_CONTRACT_VERSION = "J19B2C"
+RETAINED_MATERIAL_EVIDENCE = "RAW_MATERIAL_RETAINED_BY_PROCESSOR"
+RETAINED_QUANTITY_SOURCE = "PERSISTED_FULL_RESIDUAL_MATERIAL_DISPOSITION"
 RATE_SOURCE = "HISTORICAL_SEND_TO_SUBCONTRACTOR"
 PRECISION = Decimal("0.000001")
 AMOUNT_TOLERANCE = Decimal("0.01")
@@ -26,6 +29,7 @@ def attach_commercial_execution_preview(commercial_preview, movements, identity)
 
     result.update(
         commercial_execution_preview_contract_version=CONTRACT_VERSION,
+        retained_material_commercial_fact_contract_version=RETAINED_FACT_CONTRACT_VERSION,
         commercial_execution_scope=(
             "Historical material-content dispatch-cost suggestion at exact SCO "
             "supplied-row scope; "
@@ -87,6 +91,17 @@ def _attach_component_rate(row, movements, identity):
     treatment = persisted.get("selected_treatment_method")
     classification = persisted.get("classification")
     unaccounted = _number(row.get("unaccounted_remaining_qty"))
+    retained = bool(
+        row.get("material_disposition_current")
+        and (row.get("persisted_material_disposition") or {}).get("disposition")
+            == "RETAINED_BY_PROCESSOR"
+    )
+    recovery_quantity = unaccounted if retained and unaccounted and unaccounted > 0 else None
+    recovery_amount = (
+        recovery_quantity * suggested_rate
+        if recovery_quantity is not None and suggested_rate is not None and not issues
+        else None
+    )
     if issues or suggested_rate is None:
         readiness = "REVIEW_DISPATCH_COST_EVIDENCE"
     elif unaccounted is not None and unaccounted > 0 and not (
@@ -98,8 +113,14 @@ def _attach_component_rate(row, movements, identity):
         # credit/carry-forward, sale, or another controlled disposition must be
         # established before classification or commercial execution.
         readiness = "DEFINE_MATERIAL_DISPOSITION"
-    elif unaccounted is not None and unaccounted > 0:
+    elif retained and not classification:
         readiness = "PERSIST_COMMERCIAL_CLASSIFICATION"
+    elif retained and classification in {
+        "COMPANY_RESPONSIBLE", "NO_COMMERCIAL_ACTION_REQUIRED"
+    }:
+        readiness = "NO_COMMERCIAL_EXECUTION_REQUIRED"
+    elif retained:
+        readiness = "COMMERCIAL_TREATMENT_DEFERRED_J19B2C"
     elif not classification:
         readiness = "PERSIST_COMMERCIAL_CLASSIFICATION"
     elif classification == "NO_COMMERCIAL_ACTION_REQUIRED":
@@ -125,14 +146,31 @@ def _attach_component_rate(row, movements, identity):
             "machine, overhead, and pending subcontracting costs"
             if suggested_rate is not None else None
         ),
-        suggested_recovery_quantity=None,
-        suggested_recovery_amount=None,
+        suggested_recovery_quantity=(
+            float(recovery_quantity) if recovery_quantity is not None else None
+        ),
+        suggested_recovery_amount=(
+            float(recovery_amount) if recovery_amount is not None else None
+        ),
+        recovery_quantity_source=(
+            RETAINED_QUANTITY_SOURCE if recovery_quantity is not None else None
+        ),
+        retained_material_classification_ready=bool(
+            retained and recovery_quantity is not None
+            and recovery_amount is not None and not issues
+        ),
         commercial_execution_readiness_code=readiness,
         commercial_execution_ready=False,
         commercial_document_creation_enabled=False,
         commercial_document_authorized=False,
         lot_closure_authorized=False,
     )
+    if row["retained_material_classification_ready"]:
+        row.update(
+            commercial_decision_code=RETAINED_MATERIAL_EVIDENCE,
+            commercial_review_permitted=True,
+            raw_material_recovery_recommended=True,
+        )
 
 
 def _valid_dispatch_identity(movement, row, identity):

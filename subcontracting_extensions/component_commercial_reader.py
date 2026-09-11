@@ -230,9 +230,14 @@ def _read_decision_history(api, classification, current_policy):
             _add_issue(issues, "BROKEN_COMMERCIAL_DECISION_SUPERSESSION")
         latest[event_type] = event.name
         latest_docs[event_type] = event
-    if events:
+    # Responsibility classification is independent of settlement-method policy.
+    # Only a persisted treatment becomes stale when that policy changes.
+    treatment_policy_event = latest_docs.get("Treatment")
+    if treatment_policy_event:
         try:
-            recorded_policy = json.loads(events[-1].get("policy_snapshot") or "{}")
+            recorded_policy = json.loads(
+                treatment_policy_event.get("policy_snapshot") or "{}"
+            )
         except (TypeError, ValueError):
             recorded_policy = None
         if recorded_policy != current_policy:

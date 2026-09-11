@@ -136,6 +136,28 @@ class TestComponentCommercialExecutionPreview(unittest.TestCase):
         )["components"][0]
         self.assertEqual(row["commercial_execution_readiness_code"],
                          "PERSIST_COMMERCIAL_CLASSIFICATION")
+        self.assertEqual(row["commercial_decision_code"],
+                         "RAW_MATERIAL_RETAINED_BY_PROCESSOR")
+        self.assertTrue(row["commercial_review_permitted"])
+        self.assertTrue(row["retained_material_classification_ready"])
+        self.assertEqual(row["suggested_recovery_quantity"], 10)
+        self.assertEqual(row["recovery_quantity_source"],
+                         "PERSISTED_FULL_RESIDUAL_MATERIAL_DISPOSITION")
+        self.assertEqual(row["suggested_recovery_amount"], 50)
+        self.assertFalse(row["commercial_execution_ready"])
+
+    def test_retained_processor_classification_still_defers_treatment(self):
+        row = self.build(
+            [movement("A", 10, 5)],
+            unaccounted_remaining_qty=10,
+            material_disposition_current=True,
+            persisted_material_disposition={
+                "disposition": "RETAINED_BY_PROCESSOR", "disposition_qty": 10,
+            },
+            persisted_classification={"classification": "PROCESSOR_RESPONSIBLE"},
+        )["components"][0]
+        self.assertEqual(row["commercial_execution_readiness_code"],
+                         "COMMERCIAL_TREATMENT_DEFERRED_J19B2C")
         self.assertFalse(row["commercial_execution_ready"])
 
     def test_every_mutating_outcome_remains_disabled(self):
