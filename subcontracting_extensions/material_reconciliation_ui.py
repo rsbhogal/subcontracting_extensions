@@ -33,6 +33,9 @@ from subcontracting_extensions.component_material_disposition import (
 from subcontracting_extensions.retained_material_policy_reconciliation import (
     reconcile_retained_material_policy as persist_retained_material_policy_reconciliation,
 )
+from subcontracting_extensions.retained_material_treatment_selection import (
+    select_retained_material_treatment as persist_retained_material_treatment,
+)
 
 
 @frappe.whitelist()
@@ -155,6 +158,31 @@ def reconcile_retained_material_policy(
 
 def _parse_json(value):
     return frappe.parse_json(value) if isinstance(value, str) else value
+
+
+@frappe.whitelist()
+def select_retained_material_treatment(
+    processor_lot, scope_identity, selected_treatment_method, reason,
+    expected_purchase_order_modified, expected_processor_lot_modified,
+    expected_supplier_modified, expected_customer_modified,
+    expected_policy_reconciliation_event, expected_recovery_quantity,
+    expected_disposition_revision, expected_last_disposition_event,
+    expected_classification_revision, expected_treatment_revision,
+    expected_last_decision_event,
+):
+    """Feature-gated J19B2F selection; never executes the selected treatment."""
+    if not cint(frappe.conf.get("v2_retained_material_treatment_selection")):
+        frappe.throw("Retained-material treatment selection is not enabled")
+    return persist_retained_material_treatment(
+        frappe, get_component_commercial_preview, processor_lot,
+        _parse_json(scope_identity), selected_treatment_method, reason,
+        expected_purchase_order_modified, expected_processor_lot_modified,
+        expected_supplier_modified, expected_customer_modified,
+        expected_policy_reconciliation_event, expected_recovery_quantity,
+        expected_disposition_revision, expected_last_disposition_event,
+        expected_classification_revision, expected_treatment_revision,
+        expected_last_decision_event,
+    )
 
 
 def _read_component_return_report(processor_lot):

@@ -33,6 +33,8 @@ def record_commercial_decision(
     expected_classification_revision=0,
     expected_treatment_revision=0,
     expected_last_decision_event=None,
+    *,
+    allow_retained_material_treatment=False,
 ):
     """Append exactly one classification or treatment event in the caller transaction."""
     from frappe.utils import now_datetime
@@ -45,7 +47,10 @@ def record_commercial_decision(
     evidence_code = row.get("commercial_decision_code")
     if not _classification_entry_ready(report, row):
         raise ValueError("The exact commercial scope is not ready for classification")
-    _validate_event_stage(event_type, evidence_code)
+    _validate_event_stage(
+        event_type, evidence_code,
+        allow_retained_material_treatment=allow_retained_material_treatment,
+    )
     if event_type == "Treatment" and report.get("policy_issues"):
         raise ValueError("Settlement policy evidence requires review")
 
@@ -142,6 +147,7 @@ def record_commercial_decision(
         "recovery_customer": policy.get("recovery_customer"),
         "policy_snapshot": _json(policy),
         "commercial_document_authorized": 0,
+        "stock_document_authorized": 0,
         "lot_closure_authorized": 0,
     })
     event.flags.controlled_commercial_decision_insert = True
@@ -173,6 +179,7 @@ def record_commercial_decision(
         "policy_default_method": default_method,
         "commercial_document_creation_enabled": False,
         "commercial_document_authorized": False,
+        "stock_document_authorized": False,
         "lot_closure_authorized": False,
     }
 
@@ -199,6 +206,7 @@ def attach_decision_capabilities(api, report, *, enabled):
                 "allowed_classifications": [],
                 "allowed_treatments": [],
                 "commercial_document_authorized": False,
+                "stock_document_authorized": False,
                 "lot_closure_authorized": False,
             }
             if available:
@@ -257,8 +265,10 @@ def _classification_entry_ready(report, row):
     )
 
 
-def _validate_event_stage(event_type, evidence_code):
-    if event_type == "Treatment" and evidence_code == RETAINED_MATERIAL_EVIDENCE:
+def _validate_event_stage(event_type, evidence_code, *,
+                          allow_retained_material_treatment=False):
+    if (event_type == "Treatment" and evidence_code == RETAINED_MATERIAL_EVIDENCE
+            and not allow_retained_material_treatment):
         raise ValueError("Retained-material treatment selection is deferred beyond J19B2C")
 
 

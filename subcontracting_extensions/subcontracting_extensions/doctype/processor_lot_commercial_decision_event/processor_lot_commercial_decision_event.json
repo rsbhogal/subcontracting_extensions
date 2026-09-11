@@ -9,7 +9,7 @@
   "event_section", "commercial_classification", "scope_key", "event_sequence", "event_key", "event_type", "supersedes_event",
   "decision_section", "variance_direction", "classification", "selected_treatment_method", "reason", "decision_by", "decision_at",
   "evidence_section", "evidence_code", "evidence_snapshot", "policy_source", "policy_default_method", "recovery_customer", "policy_snapshot",
-  "safety_section", "commercial_document_authorized", "lot_closure_authorized"
+  "safety_section", "commercial_document_authorized", "stock_document_authorized", "lot_closure_authorized"
  ],
  "fields": [
   {"fieldname":"event_section","fieldtype":"Section Break","label":"Immutable Decision Event"},
@@ -35,6 +35,7 @@
   {"fieldname":"policy_snapshot","fieldtype":"Code","label":"Policy Snapshot","options":"JSON","reqd":1,"read_only":1},
   {"fieldname":"safety_section","fieldtype":"Section Break","label":"Safety Contract"},
   {"default":"0","fieldname":"commercial_document_authorized","fieldtype":"Check","label":"Commercial Document Authorized","read_only":1},
+  {"default":"0","fieldname":"stock_document_authorized","fieldtype":"Check","label":"Stock Document Authorized","read_only":1},
   {"default":"0","fieldname":"lot_closure_authorized","fieldtype":"Check","label":"Lot Closure Authorized","read_only":1}
  ],
  "grid_page_length": 50,
@@ -42,7 +43,7 @@
  "is_submittable": 0,
  "links": [],
  "module": "Subcontracting Extensions",
- "modified": "2026-09-09 00:00:00.000000",
+ "modified": "2026-09-11 00:00:00.000000",
  "modified_by": "Administrator",
  "name": "Processor Lot Commercial Decision Event",
  "naming_rule": "Expression (old style)",

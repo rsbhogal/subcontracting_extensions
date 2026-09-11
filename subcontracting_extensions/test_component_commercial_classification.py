@@ -129,6 +129,12 @@ class TestCommercialDecisionConcurrency(unittest.TestCase):
             _validate_event_stage("Treatment", "RAW_MATERIAL_RETAINED_BY_PROCESSOR")
         _validate_event_stage("Classification", "RAW_MATERIAL_RETAINED_BY_PROCESSOR")
 
+    def test_only_dedicated_contract_may_open_retained_treatment_stage(self):
+        _validate_event_stage(
+            "Treatment", "RAW_MATERIAL_RETAINED_BY_PROCESSOR",
+            allow_retained_material_treatment=True,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

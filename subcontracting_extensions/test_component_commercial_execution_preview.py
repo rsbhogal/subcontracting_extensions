@@ -158,7 +158,27 @@ class TestComponentCommercialExecutionPreview(unittest.TestCase):
         )["components"][0]
         self.assertEqual(row["commercial_execution_readiness_code"],
                          "COMMERCIAL_TREATMENT_DEFERRED_J19B2C")
-        self.assertFalse(row["commercial_execution_ready"])
+
+    def test_selected_retained_sales_invoice_remains_execution_deferred(self):
+        selected = self.build(
+            [movement("A", 10, 5)],
+            unaccounted_remaining_qty=10,
+            material_disposition_current=True,
+            persisted_material_disposition={
+                "disposition": "RETAINED_BY_PROCESSOR", "disposition_qty": 10,
+            },
+            persisted_classification={
+                "classification": "PROCESSOR_RESPONSIBLE",
+                "selected_treatment_method": "SALES_INVOICE",
+            },
+        )["components"][0]
+        self.assertEqual(
+            selected["commercial_execution_readiness_code"],
+            "RETAINED_MATERIAL_TREATMENT_SELECTED_FUTURE_EXECUTION_DEFERRED",
+        )
+        self.assertFalse(selected["commercial_execution_ready"])
+        self.assertFalse(selected["commercial_document_authorized"])
+        self.assertFalse(selected["stock_document_authorized"])
 
     def test_every_mutating_outcome_remains_disabled(self):
         result = self.build([movement("A", 10, 5)])
@@ -166,6 +186,7 @@ class TestComponentCommercialExecutionPreview(unittest.TestCase):
         for target in (result, row):
             self.assertFalse(target["commercial_document_creation_enabled"])
             self.assertFalse(target["commercial_document_authorized"])
+            self.assertFalse(target["stock_document_authorized"])
             self.assertFalse(target["lot_closure_authorized"])
 
 

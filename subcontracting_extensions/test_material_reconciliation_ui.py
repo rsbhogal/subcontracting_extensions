@@ -283,6 +283,33 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.assertFalse(result["commercial_document_authorized"])
         self.assertFalse(result["stock_document_authorized"])
 
+    def test_retained_treatment_selection_is_flag_guarded_and_delegated(self):
+        self.frappe.throw = Mock(side_effect=RuntimeError)
+        identity = '{"sco_supplied_item":"RM-A","sco_finished_item":"FG-A"}'
+        arguments = (
+            "LOT", identity, "SALES_INVOICE", "Approved reason", "PO-MOD",
+            "LOT-MOD", "SUP-MOD", "CUS-MOD", "PLPRE-1", "20000",
+            1, "PLMDE-1", 1, 0, "PLCD-1",
+        )
+        with self.assertRaises(RuntimeError):
+            self.module.select_retained_material_treatment(*arguments)
+
+        self.frappe.conf["v2_retained_material_treatment_selection"] = 1
+        self.module.persist_retained_material_treatment = Mock(return_value={
+            "contract_version": "J19B2F", "commercial_document_authorized": False,
+            "stock_document_authorized": False, "lot_closure_authorized": False,
+        })
+        result = self.module.select_retained_material_treatment(*arguments)
+        delegated = self.module.persist_retained_material_treatment.call_args.args
+        self.assertIs(delegated[0], self.frappe)
+        self.assertIs(delegated[1], self.module.get_component_commercial_preview)
+        self.assertEqual(delegated[2], "LOT")
+        self.assertEqual(delegated[3]["sco_supplied_item"], "RM-A")
+        self.assertEqual(delegated[-3:], (1, 0, "PLCD-1"))
+        self.assertEqual(result["contract_version"], "J19B2F")
+        self.assertFalse(result["commercial_document_authorized"])
+        self.assertFalse(result["stock_document_authorized"])
+
     def check_single_item_routing(self, enabled):
         spec = importlib.util.spec_from_file_location("j14_position_under_test",
             Path(__file__).with_name("receipt_item_position.py"))
@@ -314,7 +341,7 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.check_single_item_routing(0)
 
     def test_whitelist_does_not_enable_guest_access(self):
-        self.assertEqual(self.frappe.whitelist.call_count, 8)
+        self.assertEqual(self.frappe.whitelist.call_count, 9)
 
 
 if __name__ == "__main__":

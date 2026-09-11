@@ -317,7 +317,9 @@ def _read_decision_history(api, classification, current_policy):
             _add_issue(issues, "INVALID_COMMERCIAL_DECISION_EVENT_KEY")
         if not all((event.get("reason"), event.get("decision_by"), event.get("decision_at"))):
             _add_issue(issues, "INCOMPLETE_COMMERCIAL_DECISION_AUDIT")
-        if event.get("commercial_document_authorized") or event.get("lot_closure_authorized"):
+        if (event.get("commercial_document_authorized")
+                or event.get("stock_document_authorized")
+                or event.get("lot_closure_authorized")):
             _add_issue(issues, "COMMERCIAL_DECISION_UNSAFE_AUTHORIZATION")
         expected_previous = latest.get(event_type)
         if event.get("supersedes_event") != expected_previous:
@@ -384,6 +386,7 @@ def _read_decision_history(api, classification, current_policy):
         ],
         "commercial_document_creation_enabled": False,
         "commercial_document_authorized": False,
+        "stock_document_authorized": False,
         "lot_closure_authorized": False,
     }, issues
 

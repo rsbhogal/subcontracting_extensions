@@ -37,6 +37,7 @@ def attach_commercial_execution_preview(commercial_preview, movements, identity)
         ),
         commercial_document_creation_enabled=False,
         commercial_document_authorized=False,
+        stock_document_authorized=False,
         lot_closure_authorized=False,
     )
     return result
@@ -119,6 +120,8 @@ def _attach_component_rate(row, movements, identity):
         "COMPANY_RESPONSIBLE", "NO_COMMERCIAL_ACTION_REQUIRED"
     }:
         readiness = "NO_COMMERCIAL_EXECUTION_REQUIRED"
+    elif retained and treatment == "SALES_INVOICE":
+        readiness = "RETAINED_MATERIAL_TREATMENT_SELECTED_FUTURE_EXECUTION_DEFERRED"
     elif retained:
         readiness = "COMMERCIAL_TREATMENT_DEFERRED_J19B2C"
     elif not classification:
@@ -163,6 +166,7 @@ def _attach_component_rate(row, movements, identity):
         commercial_execution_ready=False,
         commercial_document_creation_enabled=False,
         commercial_document_authorized=False,
+        stock_document_authorized=False,
         lot_closure_authorized=False,
     )
     if row["retained_material_classification_ready"]:
