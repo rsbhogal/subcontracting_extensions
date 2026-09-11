@@ -379,6 +379,24 @@ class TestComponentCommercialReader(unittest.TestCase):
             self.assertEqual(reader.get_component_commercial_preview("LOT"), expected)
         read.assert_called_once_with(self.api, "LOT")
 
+    def test_j19b2d_context_uses_resolved_policy_before_report_finalization(self):
+        policy = {
+            "shortage_settlement_method": "PENDING_INVESTIGATION",
+            "excess_settlement_method": "PENDING_OWNERSHIP_INVESTIGATION",
+        }
+        context = reader._retained_material_readiness_context(
+            self.api, self.lot, self.po, self.sco,
+            {"components": []}, policy,
+        )
+        self.assertEqual(
+            context["purchase_order_policy"]["shortage_settlement_method"],
+            "PENDING_INVESTIGATION",
+        )
+        self.assertEqual(
+            context["purchase_order_policy"]["excess_settlement_method"],
+            "PENDING_OWNERSHIP_INVESTIGATION",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

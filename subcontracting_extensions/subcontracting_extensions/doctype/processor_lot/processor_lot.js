@@ -522,6 +522,17 @@ function j19_decision_label(code) {
         DISPATCH_COST_RATE_INVALID: "Invalid dispatch-cost rate",
         DISPATCH_COST_AMOUNT_MISMATCH: "Dispatch-cost amount mismatch",
         DISPATCH_COST_EVIDENCE_INVALID: "Invalid dispatch-cost evidence",
+        RETAINED_MATERIAL_TREATMENT_POLICY_NOT_READY: "Retained-material treatment policy is not ready",
+        RETAINED_MATERIAL_TREATMENT_READY_FOR_FUTURE_EXECUTION_DESIGN: "Retained-material evidence is ready for future execution design",
+        BLOCKED_STALE_PROCESSOR_LOT_SNAPSHOT: "Blocked by stale Processor Lot policy snapshot",
+        SHORTAGE_SETTLEMENT_METHOD_PENDING_INVESTIGATION: "Shortage settlement method remains Pending Investigation",
+        RECOVERY_CUSTOMER_NOT_SNAPSHOTTED_ON_PURCHASE_ORDER: "Recovery Customer is not snapshotted on the Purchase Order",
+        RECOVERY_CUSTOMER_NOT_SNAPSHOTTED_ON_PROCESSOR_LOT: "Recovery Customer is not snapshotted on the Processor Lot",
+        RETAINED_MATERIAL_SALES_INVOICE_METHOD_NOT_READY: "Sales Invoice treatment is not selected in the contractual policy",
+        RETAINED_MATERIAL_SUPPLIER_WAREHOUSE_STOCK_NOT_READY: "Supplier-warehouse stock evidence is not ready",
+        RETAINED_MATERIAL_STOCK_SCOPE_AMBIGUOUS: "Multiple retained scopes share the supplier-warehouse stock position",
+        RETAINED_MATERIAL_PROCESSOR_RESPONSIBILITY_NOT_READY: "Processor-responsibility classification is not ready",
+        DEFERRED_TO_STANDARD_ERPNEXT_SALES_INVOICE_TAX_RESOLUTION: "Deferred to standard ERPNext Sales Invoice tax resolution",
     };
     return __(labels[code] || code || "Commercial evidence requires review");
 }
@@ -602,6 +613,34 @@ function j19_material_disposition_html(row, index) {
         data-j19-disposition data-j19-index="${index}">${j14_escape(button_label)}</button>
         <div class="text-muted" style="margin-top:5px">${j14_escape(__(
             "Records the full residual as evidence only; no document or lot closure is authorised."))}</div>`;
+}
+
+function j19_retained_treatment_readiness_html(row) {
+    const readiness = row.retained_material_treatment_readiness || {};
+    if (!readiness.applicable) return "";
+    const issues = (readiness.blocking_issues || []).map(code =>
+        `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
+    const customer = readiness.recovery_customer_candidate || "—";
+    const tax = j19_decision_label(readiness.tax_calculation_status);
+    return `<div style="margin:10px 0">
+        <div style="font-size:14px;font-weight:600;margin-bottom:6px">${j14_escape(__("Retained-material treatment readiness"))}</div>
+        <div>${j14_badge(j19_decision_label(readiness.readiness_code),
+            readiness.blocking_issues?.length ? "amber" : "green")}</div>
+        ${j14_table(["Future Treatment", "Customer", "Net Material Amount", "Tax", "Stock Consequence"], [[
+            j14_escape(__("Sales Invoice with Update Stock")),
+            j14_escape(customer),
+            readiness.net_material_amount_excluding_tax == null ? "—"
+                : j14_qty(readiness.net_material_amount_excluding_tax),
+            j14_escape(tax),
+            `${j14_qty(readiness.projected_stock_reduction)} ${j14_escape(row.stock_uom)} ${j14_escape(__("from"))}
+             ${j14_escape(readiness.future_source_warehouse || "—")} · ${j14_qty(
+                readiness.supplier_warehouse_qty_before)} → ${j14_qty(
+                readiness.projected_supplier_warehouse_qty_after)}`,
+        ]])}
+        ${issues ? `<div>${j14_badge(__("Readiness blockers"), "amber")}<ul>${issues}</ul></div>` : ""}
+        <p class="text-muted">${j14_escape(__(
+            "Future design only: Update Stock = 1. No treatment selection, Sales Invoice, stock posting, accounting posting, or lot closure is authorised."))}</p>
+    </div>`;
 }
 
 function build_j19_commercial_summary(report) {
@@ -690,6 +729,9 @@ function build_j19_commercial_panel(report, detailed = false) {
                 ${j14_qty(row.suggested_recovery_quantity)} ${j14_escape(row.stock_uom)}
                 · <strong>${j14_escape(__("Suggested material amount"))}:</strong>
                 ${j14_qty(row.suggested_recovery_amount)}</div>`;
+        const readiness_code = row.retained_material_treatment_readiness?.applicable
+            ? row.retained_material_treatment_readiness.readiness_code
+            : row.commercial_execution_readiness_code;
         return `<div>${suggested}</div>
             ${recovery}
             ${evidence ? `<div class="text-muted" style="margin-top:5px">${evidence}</div>` : ""}
@@ -697,7 +739,7 @@ function build_j19_commercial_panel(report, detailed = false) {
             ${row.suggested_recovery_rate_basis ? `<div class="text-muted" style="margin-top:5px">${j14_escape(
                 row.suggested_recovery_rate_basis)}</div>` : ""}
             <div class="text-muted" style="margin-top:5px">${j14_escape(
-                j19_decision_label(row.commercial_execution_readiness_code))}</div>`;
+                j19_decision_label(readiness_code))}</div>`;
     };
     const finished_rows = (report.finished_items || []).map((row, index) => [
         j14_escape(row.finished_item), j14_escape(row.stock_uom), j14_qty(row.company_accepted_qty),
@@ -737,8 +779,10 @@ function build_j19_commercial_panel(report, detailed = false) {
         `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
     const retained_fact_present = (report.components || []).some(row =>
         row.commercial_decision_code === "RAW_MATERIAL_RETAINED_BY_PROCESSOR");
+    const retained_readiness_present = (report.components || []).some(row =>
+        row.retained_material_treatment_readiness?.applicable);
     const material_rate_note = retained_fact_present
-        ? __("J19B2C derives the exact recovery quantity from the current full-residual retained-material disposition and suggests its material-content amount from exact historical dispatch cost. It excludes ABC processing and consumable costs and authorises neither treatment, a document, nor lot closure.")
+        ? __("J19B2D validates the exact retained-material recovery quantity, historical material-content cost, recovery-customer readiness, and future Update Stock consequence. It excludes ABC processing and consumable costs and authorises neither treatment, a document, nor lot closure.")
         : __("J19B2A suggests the material-content rate from exact historical dispatch cost. It excludes ABC processing and consumable costs, does not define a recovery quantity, and authorises neither a document nor lot closure.");
     return `<div data-j19-commercial-preview style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
         <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("Component commercial preview"))}</div>
@@ -749,8 +793,9 @@ function build_j19_commercial_panel(report, detailed = false) {
         ${policy_readiness}
         ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Evidence", "Persisted Classification", "Invoice Evidence", "Decision"], finished_rows)}
         ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Evidence", "Disposition / Classification", "Dispatch Cost Evidence", "Decision"], component_rows)}
+        ${(report.components || []).map(j19_retained_treatment_readiness_html).join("")}
         <p class="text-muted">${j14_escape(material_rate_note)}</p>
-        ${policy ? `<div>${j14_badge(__("Settlement policy requires review"), "amber")}<ul>${policy}</ul></div>` : ""}
+        ${policy && !retained_readiness_present ? `<div>${j14_badge(__("Settlement policy requires review"), "amber")}<ul>${policy}</ul></div>` : ""}
         ${classification_issues ? `<div>${j14_badge(__("Persisted classification requires review"), "amber")}<ul>${classification_issues}</ul></div>` : ""}
         ${legacy ? `<div>${j14_badge(__("Legacy commercial evidence"), "amber")}<ul>${legacy}</ul></div>` : ""}
     </div>`;

@@ -171,7 +171,7 @@ function commercial() {
     html = context.build_j19_commercial_panel(retained, true);
     assert(html.includes("Raw material retained by processor"));
     assert(html.includes("Recovery quantity") && html.includes("1030.000"));
-    assert(html.includes("derives the exact recovery quantity"));
+    assert(html.includes("J19B2D validates the exact retained-material recovery quantity"));
     assert(html.includes("authorises neither treatment, a document, nor lot closure"));
     assert(html.includes('data-j19-decision="classification"'));
     assert(!html.includes('data-j19-decision="treatment"'));
@@ -185,6 +185,37 @@ function commercial() {
     };
     retained.components[1].commercial_execution_readiness_code =
         "COMMERCIAL_TREATMENT_DEFERRED_J19B2C";
+    retained.components[1].retained_material_treatment_readiness = {
+        applicable: true,
+        readiness_code: "RETAINED_MATERIAL_TREATMENT_POLICY_NOT_READY",
+        blocking_issues: ["PROCESSOR_LOT_POLICY_DIFFERS_FROM_PURCHASE_ORDER",
+            "SHORTAGE_SETTLEMENT_METHOD_PENDING_INVESTIGATION",
+            "RECOVERY_CUSTOMER_NOT_SNAPSHOTTED_ON_PURCHASE_ORDER",
+            "RECOVERY_CUSTOMER_NOT_SNAPSHOTTED_ON_PROCESSOR_LOT"],
+        recovery_customer_candidate: "Shiv <unsafe>",
+        net_material_amount_excluding_tax: 1030,
+        tax_calculation_status: "DEFERRED_TO_STANDARD_ERPNEXT_SALES_INVOICE_TAX_RESOLUTION",
+        projected_stock_reduction: 25,
+        future_source_warehouse: "Processor <unsafe>",
+        supplier_warehouse_qty_before: 25,
+        projected_supplier_warehouse_qty_after: 0,
+        commercial_document_creation_enabled: false,
+        commercial_document_authorized: false,
+        stock_document_authorized: false,
+        lot_closure_authorized: false,
+    };
+    html = context.build_j19_commercial_panel(retained, true);
+    assert(html.includes("Retained-material treatment readiness"));
+    assert(html.includes("Sales Invoice with Update Stock"));
+    assert(html.includes("Future design only: Update Stock = 1"));
+    assert(html.includes("Shiv &lt;unsafe&gt;") && !html.includes("Shiv <unsafe>"));
+    assert(html.includes("Processor &lt;unsafe&gt;") && !html.includes("Processor <unsafe>"));
+    assert(html.includes("Recovery Customer is not snapshotted on the Purchase Order"));
+    assert(html.includes("Deferred to standard ERPNext Sales Invoice tax resolution"));
+    assert(!html.includes("Create Sales Invoice"));
+    assert(!html.includes("Commercial treatment deferred beyond J19B2C"));
+    assert(html.includes("J19B2D validates the exact retained-material recovery quantity"));
+    assert(!html.includes("Settlement policy requires review"));
     html = context.build_j19_commercial_panel(retained);
     assert(html.includes("Processor Responsible"));
     assert(!html.includes("PROCESSOR_RESPONSIBLE"));

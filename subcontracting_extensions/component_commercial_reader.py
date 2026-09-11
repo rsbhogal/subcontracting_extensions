@@ -9,6 +9,9 @@ from subcontracting_extensions.component_commercial_preview import (
 from subcontracting_extensions.component_commercial_execution_preview import (
     attach_commercial_execution_preview,
 )
+from subcontracting_extensions.component_retained_material_readiness import (
+    attach_retained_material_treatment_readiness,
+)
 from subcontracting_extensions.component_material_disposition import (
     attach_material_dispositions,
 )
@@ -109,6 +112,10 @@ def _read_component_commercial_preview(
             "supplier_warehouse": sco.get("supplier_warehouse"),
         },
     )
+    result = attach_retained_material_treatment_readiness(
+        result,
+        _retained_material_readiness_context(api, lot, po, sco, result, policy),
+    )
     if classification_issues or result.get("material_disposition_issues"):
         result["commercial_review_permitted"] = False
         result["commercial_decision_code"] = (
@@ -135,6 +142,93 @@ def _read_component_commercial_preview(
         lot_closure_authorized=False,
     )
     return result
+
+
+def _retained_material_readiness_context(api, lot, po, sco, report, policy):
+    """Read only the live counterparty and stock facts required by J19B2D."""
+    policy = policy or {}
+    supplier = api.get_doc("Supplier", sco.get("supplier"))
+    supplier.check_permission("read")
+    bound_customer = supplier.get("custom_recovery_customer")
+    customer_enabled = False
+    address_ready = False
+    if bound_customer:
+        try:
+            customer = api.get_doc("Customer", bound_customer)
+            customer.check_permission("read")
+            customer_enabled = not bool(customer.get("disabled"))
+            links = api.get_all(
+                "Dynamic Link",
+                filters={"link_doctype": "Customer", "link_name": bound_customer,
+                         "parenttype": "Address"},
+                fields=["parent"],
+                limit_page_length=1,
+            )
+            address_ready = bool(links)
+        except (KeyError, TypeError):
+            customer_enabled = False
+
+    bin_row = None
+    retained = any(
+        row.get("commercial_decision_code") == "RAW_MATERIAL_RETAINED_BY_PROCESSOR"
+        for row in (report.get("components") or [])
+    )
+    if retained:
+        component_items = {
+            row.get("component_item") for row in (report.get("components") or [])
+            if row.get("commercial_decision_code") == "RAW_MATERIAL_RETAINED_BY_PROCESSOR"
+        }
+        if len(component_items) == 1:
+            bins = api.get_all(
+                "Bin",
+                filters={"item_code": next(iter(component_items)),
+                         "warehouse": sco.get("supplier_warehouse")},
+                fields=["actual_qty", "valuation_rate", "stock_value"],
+                limit_page_length=2,
+            )
+            if len(bins) == 1:
+                bin_row = bins[0]
+
+    po_policy = {
+        "recover_raw_material_shortage": bool(po.get("custom_recover_raw_material_shortage")),
+        "recover_processing_charges_on_shortage": bool(
+            po.get("custom_recover_processing_charges_on_shortage")
+        ),
+        "settlement_basis": po.get("custom_settlement_basis"),
+        "shortage_settlement_method": policy.get("shortage_settlement_method"),
+        "excess_settlement_method": policy.get("excess_settlement_method"),
+        "recovery_customer": po.get("custom_recovery_customer"),
+    }
+    lot_policy = {
+        "override_settlement_policy": bool(lot.get("override_settlement_policy")),
+        "recover_raw_material_shortage": bool(lot.get("recover_raw_material_shortage")),
+        "recover_processing_charges_on_shortage": bool(
+            lot.get("recover_processing_charges_on_shortage")
+        ),
+        "settlement_basis": lot.get("settlement_basis"),
+        "shortage_settlement_method": lot.get("shortage_settlement_method") or policy.get(
+            "shortage_settlement_method"
+        ),
+        "excess_settlement_method": lot.get("excess_settlement_method") or policy.get(
+            "excess_settlement_method"
+        ),
+        "recovery_customer": lot.get("recovery_customer"),
+    }
+    return {
+        "purchase_order_policy": po_policy,
+        "processor_lot_policy": lot_policy,
+        "supplier_bound_customer": bound_customer,
+        "recovery_customer_enabled": customer_enabled,
+        "recovery_customer_address_ready": address_ready,
+        "supplier_warehouse": sco.get("supplier_warehouse"),
+        "retained_scope_count": sum(
+            row.get("commercial_decision_code") == "RAW_MATERIAL_RETAINED_BY_PROCESSOR"
+            for row in (report.get("components") or [])
+        ),
+        "supplier_warehouse_actual_qty": bin_row and bin_row.get("actual_qty"),
+        "supplier_warehouse_valuation_rate": bin_row and bin_row.get("valuation_rate"),
+        "supplier_warehouse_stock_value": bin_row and bin_row.get("stock_value"),
+    }
 
 
 def _attach_persisted_classifications(api, lot, result, current_policy):
