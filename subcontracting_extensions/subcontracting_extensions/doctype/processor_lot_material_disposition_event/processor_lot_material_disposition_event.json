@@ -1,0 +1,31 @@
+{
+ "actions": [], "allow_rename": 0, "autoname": "PLMDE-.#####", "creation": "2026-09-10 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
+ "field_order": ["event_section","material_disposition","scope_key","event_sequence","event_key","supersedes_event","decision_section","disposition","disposition_qty","stock_uom","reason","decision_by","decision_at","evidence_section","evidence_code","evidence_snapshot","suggested_recovery_rate","suggested_recovery_rate_source","rate_evidence_snapshot","safety_section","commercial_document_authorized","stock_document_authorized","lot_closure_authorized"],
+ "fields": [
+  {"fieldname":"event_section","fieldtype":"Section Break","label":"Immutable Disposition Event"},
+  {"fieldname":"material_disposition","fieldtype":"Link","label":"Material Disposition","options":"Processor Lot Material Disposition","reqd":1,"read_only":1,"in_list_view":1,"search_index":1},
+  {"fieldname":"scope_key","fieldtype":"Data","label":"Scope Key","reqd":1,"read_only":1,"no_copy":1,"search_index":1},
+  {"fieldname":"event_sequence","fieldtype":"Int","label":"Event Sequence","reqd":1,"read_only":1},
+  {"fieldname":"event_key","fieldtype":"Data","label":"Event Key","reqd":1,"read_only":1,"unique":1,"no_copy":1},
+  {"fieldname":"supersedes_event","fieldtype":"Link","label":"Supersedes Event","options":"Processor Lot Material Disposition Event","read_only":1},
+  {"fieldname":"decision_section","fieldtype":"Section Break","label":"Decision"},
+  {"fieldname":"disposition","fieldtype":"Select","label":"Disposition","options":"PENDING_INVESTIGATION\nRETAINED_BY_PROCESSOR","reqd":1,"read_only":1,"in_list_view":1},
+  {"fieldname":"disposition_qty","fieldtype":"Float","label":"Exact Disposition Quantity","reqd":1,"read_only":1},
+  {"fieldname":"stock_uom","fieldtype":"Link","label":"Stock UOM","options":"UOM","reqd":1,"read_only":1},
+  {"fieldname":"reason","fieldtype":"Small Text","label":"Reason","reqd":1,"read_only":1},
+  {"fieldname":"decision_by","fieldtype":"Link","label":"Decision By","options":"User","reqd":1,"read_only":1},
+  {"fieldname":"decision_at","fieldtype":"Datetime","label":"Decision At","reqd":1,"read_only":1},
+  {"fieldname":"evidence_section","fieldtype":"Section Break","label":"Decision-time Evidence"},
+  {"fieldname":"evidence_code","fieldtype":"Data","label":"Evidence Code","reqd":1,"read_only":1},
+  {"fieldname":"evidence_snapshot","fieldtype":"Code","label":"Evidence Snapshot","options":"JSON","reqd":1,"read_only":1},
+  {"fieldname":"suggested_recovery_rate","fieldtype":"Currency","label":"Suggested Material-content Rate","read_only":1},
+  {"fieldname":"suggested_recovery_rate_source","fieldtype":"Data","label":"Rate Source","read_only":1},
+  {"fieldname":"rate_evidence_snapshot","fieldtype":"Code","label":"Rate Evidence Snapshot","options":"JSON","reqd":1,"read_only":1},
+  {"fieldname":"safety_section","fieldtype":"Section Break","label":"Safety Contract"},
+  {"default":"0","fieldname":"commercial_document_authorized","fieldtype":"Check","label":"Commercial Document Authorized","read_only":1},
+  {"default":"0","fieldname":"stock_document_authorized","fieldtype":"Check","label":"Stock Document Authorized","read_only":1},
+  {"default":"0","fieldname":"lot_closure_authorized","fieldtype":"Check","label":"Lot Closure Authorized","read_only":1}
+ ],
+ "grid_page_length":50,"index_web_pages_for_search":1,"is_submittable":0,"links":[],"module":"Subcontracting Extensions","modified":"2026-09-10 00:00:00.000000","modified_by":"Administrator","name":"Processor Lot Material Disposition Event","naming_rule":"Expression (old style)","owner":"Administrator",
+ "permissions":[{"read":1,"report":1,"export":1,"role":"System Manager"},{"read":1,"report":1,"role":"Stock User"},{"read":1,"report":1,"role":"Stock Manager"},{"read":1,"report":1,"role":"Accounts User"},{"read":1,"report":1,"role":"Accounts Manager"}],"sort_field":"creation","sort_order":"DESC","states":[]
+}

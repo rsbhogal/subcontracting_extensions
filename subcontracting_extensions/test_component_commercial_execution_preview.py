@@ -125,6 +125,19 @@ class TestComponentCommercialExecutionPreview(unittest.TestCase):
         )
         self.assertFalse(row["commercial_execution_ready"])
 
+    def test_exact_retained_disposition_advances_only_to_classification(self):
+        row = self.build(
+            [movement("A", 10, 5)],
+            unaccounted_remaining_qty=10,
+            material_disposition_current=True,
+            persisted_material_disposition={
+                "disposition": "RETAINED_BY_PROCESSOR", "disposition_qty": 10,
+            },
+        )["components"][0]
+        self.assertEqual(row["commercial_execution_readiness_code"],
+                         "PERSIST_COMMERCIAL_CLASSIFICATION")
+        self.assertFalse(row["commercial_execution_ready"])
+
     def test_every_mutating_outcome_remains_disabled(self):
         result = self.build([movement("A", 10, 5)])
         row = result["components"][0]

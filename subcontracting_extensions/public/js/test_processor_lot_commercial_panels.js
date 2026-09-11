@@ -109,6 +109,43 @@ function commercial() {
     assert(html.includes("does not define a recovery quantity"));
     assert(!html.includes("Create Debit Note") && !html.includes("<button"));
 
+    report.material_disposition_entry_enabled = true;
+    report.components[1].unaccounted_remaining_qty = 25;
+    report.components[1].material_disposition_capability = {
+        entry_available: true, exact_disposition_qty: 25,
+        allowed_dispositions: [
+            {value: "PENDING_INVESTIGATION", label: "Pending Investigation"},
+            {value: "RETAINED_BY_PROCESSOR", label: "Retained by Processor"},
+        ], commercial_document_authorized: false, stock_document_authorized: false,
+        lot_closure_authorized: false,
+    };
+    html = context.build_j19_commercial_panel(report, true);
+    const undefined_disposition_html = context.j19_material_disposition_html(report.components[1], 1);
+    assert(undefined_disposition_html.includes("data-j19-disposition")
+        && undefined_disposition_html.includes("Define Material Disposition"));
+    assert(undefined_disposition_html.includes('font-weight:600;color:#b7791f">Not defined'));
+    assert(undefined_disposition_html.includes("Action required"));
+    assert(undefined_disposition_html.includes('class="btn btn-xs btn-primary"'));
+    assert(html.includes("Records the full residual as evidence only"));
+    assert(!html.includes("Create Debit Note"));
+
+    report.components[1].persisted_material_disposition = {
+        disposition: "RETAINED_BY_PROCESSOR", disposition_qty: 25, stock_uom: "Units",
+        disposition_revision: 1,
+    };
+    html = context.build_j19_commercial_panel(report, true);
+    const persisted_disposition_html = context.j19_material_disposition_html(report.components[1], 1);
+    assert(html.includes("Retained by processor") && html.includes("25.000"));
+    assert(persisted_disposition_html.includes("Revise Disposition"));
+    assert(persisted_disposition_html.includes('class="btn btn-xs btn-default"'));
+    assert(persisted_disposition_html.includes(
+        "background:#f1f3f5;border-color:#9aa4ad;color:#36414c;font-weight:500"));
+    assert(!persisted_disposition_html.includes("Action required"));
+    assert(!persisted_disposition_html.includes("Define Material Disposition"));
+    report.material_disposition_entry_enabled = false;
+    report.components[1].material_disposition_capability = {entry_available: false,
+        allowed_dispositions: []};
+
     report.commercial_decision_entry_enabled = true;
     report.finished_items[0].decision_capability = {
         variance_direction: "Shortage", classification_entry_available: true,

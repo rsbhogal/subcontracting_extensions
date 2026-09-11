@@ -9,6 +9,9 @@ from subcontracting_extensions.component_commercial_preview import (
 from subcontracting_extensions.component_commercial_execution_preview import (
     attach_commercial_execution_preview,
 )
+from subcontracting_extensions.component_material_disposition import (
+    attach_material_dispositions,
+)
 from subcontracting_extensions.material_reconciliation_reader import (
     get_material_position,
 )
@@ -95,6 +98,7 @@ def _read_component_commercial_preview(
         },
     )
     classification_issues = _attach_persisted_classifications(api, lot, result, policy)
+    result = attach_material_dispositions(api, lot, result)
     result = attach_commercial_execution_preview(
         result,
         material.get("movements") or [],
@@ -105,17 +109,21 @@ def _read_component_commercial_preview(
             "supplier_warehouse": sco.get("supplier_warehouse"),
         },
     )
-    if classification_issues:
+    if classification_issues or result.get("material_disposition_issues"):
         result["commercial_review_permitted"] = False
-        result["commercial_decision_code"] = "REVIEW_PERSISTED_COMMERCIAL_CLASSIFICATION"
+        result["commercial_decision_code"] = (
+            "REVIEW_PERSISTED_COMMERCIAL_CLASSIFICATION"
+            if classification_issues else "REVIEW_PERSISTED_MATERIAL_DISPOSITION"
+        )
         result["commercial_decision_detail"] = (
-            "Correct persisted commercial-classification evidence before treatment."
+            "Correct persisted controlled evidence before treatment."
         )
     result.update(
         commercial_reader_version=READER_VERSION,
         evidence_scope=(
             "Exact SCO supplied rows and verified allocation-linked SCR/PR/PI "
-            "journeys; no classification, write, accounting action, or closure"
+            "journeys and controlled component disposition; no commercial, stock, "
+            "accounting action, or closure"
         ),
         receipt_completion=deepcopy(completion),
         settlement_policy=policy,

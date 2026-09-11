@@ -26,6 +26,10 @@ from subcontracting_extensions.component_commercial_classification import (
     attach_decision_capabilities,
     record_commercial_decision as persist_commercial_decision,
 )
+from subcontracting_extensions.component_material_disposition import (
+    attach_material_disposition_capabilities,
+    record_material_disposition as persist_material_disposition,
+)
 
 
 @frappe.whitelist()
@@ -61,12 +65,37 @@ def get_commercial_preview_panel(processor_lot):
     if not cint(frappe.conf.get("v2_component_commercial_preview")):
         return {"enabled": False}
     report = get_component_commercial_preview(processor_lot)
+    report = attach_material_disposition_capabilities(
+        frappe,
+        report,
+        enabled=bool(cint(frappe.conf.get("v2_component_material_disposition"))),
+    )
     report = attach_decision_capabilities(
         frappe,
         report,
         enabled=bool(cint(frappe.conf.get("v2_component_commercial_classification"))),
     )
     return dict(report, enabled=True)
+
+
+@frappe.whitelist()
+def record_component_material_disposition(processor_lot, scope_identity,
+                                          disposition, reason,
+                                          expected_revision=0,
+                                          expected_last_event=None):
+    """Feature-gated J19B2B evidence persistence; no document is created."""
+    if not cint(frappe.conf.get("v2_component_material_disposition")):
+        frappe.throw("Component material disposition is not enabled")
+    return persist_material_disposition(
+        frappe,
+        get_component_commercial_preview,
+        processor_lot,
+        frappe.parse_json(scope_identity) if isinstance(scope_identity, str) else scope_identity,
+        disposition,
+        reason,
+        expected_revision,
+        expected_last_event,
+    )
 
 
 @frappe.whitelist()

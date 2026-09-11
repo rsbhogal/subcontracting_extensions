@@ -1,0 +1,33 @@
+{
+ "actions": [], "allow_rename": 0, "autoname": "PLMD-.#####", "creation": "2026-09-10 00:00:00.000000",
+ "doctype": "DocType", "engine": "InnoDB",
+ "field_order": ["scope_section","processor_lot","subcontracting_order","purchase_order","scope_key","identity_section","sco_supplied_item","sco_finished_item","component_item","stock_uom","finished_item","party_section","company","supplier","current_section","current_disposition","current_disposition_qty","audit_section","disposition_revision","last_disposition_event","last_decision_by","last_decision_at"],
+ "fields": [
+  {"fieldname":"scope_section","fieldtype":"Section Break","label":"Exact Component Scope"},
+  {"fieldname":"processor_lot","fieldtype":"Link","label":"Processor Lot","options":"Processor Lot","reqd":1,"read_only":1,"in_list_view":1,"search_index":1},
+  {"fieldname":"subcontracting_order","fieldtype":"Link","label":"Subcontracting Order","options":"Subcontracting Order","reqd":1,"read_only":1,"search_index":1},
+  {"fieldname":"purchase_order","fieldtype":"Link","label":"Purchase Order","options":"Purchase Order","reqd":1,"read_only":1},
+  {"fieldname":"scope_key","fieldtype":"Data","label":"Scope Key","reqd":1,"read_only":1,"unique":1,"no_copy":1,"search_index":1},
+  {"fieldname":"identity_section","fieldtype":"Section Break","label":"Component Identity"},
+  {"fieldname":"sco_supplied_item","fieldtype":"Data","label":"SCO Supplied Item","reqd":1,"read_only":1,"no_copy":1,"search_index":1},
+  {"fieldname":"sco_finished_item","fieldtype":"Data","label":"SCO Finished Item","reqd":1,"read_only":1,"no_copy":1,"search_index":1},
+  {"fieldname":"component_item","fieldtype":"Link","label":"Component Item","options":"Item","reqd":1,"read_only":1},
+  {"fieldname":"stock_uom","fieldtype":"Link","label":"Stock UOM","options":"UOM","reqd":1,"read_only":1},
+  {"fieldname":"finished_item","fieldtype":"Link","label":"Finished Item","options":"Item","reqd":1,"read_only":1},
+  {"fieldname":"party_section","fieldtype":"Section Break","label":"Controlled Party Identity"},
+  {"fieldname":"company","fieldtype":"Link","label":"Company","options":"Company","reqd":1,"read_only":1},
+  {"fieldname":"supplier","fieldtype":"Link","label":"Supplier","options":"Supplier","reqd":1,"read_only":1},
+  {"fieldname":"current_section","fieldtype":"Section Break","label":"Current Persisted Disposition"},
+  {"fieldname":"current_disposition","fieldtype":"Select","label":"Disposition","options":"PENDING_INVESTIGATION\nRETAINED_BY_PROCESSOR","read_only":1,"in_list_view":1},
+  {"fieldname":"current_disposition_qty","fieldtype":"Float","label":"Exact Disposition Quantity","read_only":1},
+  {"fieldname":"audit_section","fieldtype":"Section Break","label":"Latest Audit Evidence"},
+  {"default":"0","fieldname":"disposition_revision","fieldtype":"Int","label":"Disposition Revision","read_only":1},
+  {"fieldname":"last_disposition_event","fieldtype":"Link","label":"Last Disposition Event","options":"Processor Lot Material Disposition Event","read_only":1},
+  {"fieldname":"last_decision_by","fieldtype":"Link","label":"Last Decision By","options":"User","read_only":1},
+  {"fieldname":"last_decision_at","fieldtype":"Datetime","label":"Last Decision At","read_only":1}
+ ],
+ "grid_page_length": 50, "index_web_pages_for_search": 1, "is_submittable": 0, "links": [], "module": "Subcontracting Extensions",
+ "modified": "2026-09-10 00:00:00.000000", "modified_by": "Administrator", "name": "Processor Lot Material Disposition", "naming_rule": "Expression (old style)", "owner": "Administrator",
+ "permissions": [{"read":1,"report":1,"export":1,"role":"System Manager"},{"read":1,"report":1,"role":"Stock User"},{"read":1,"report":1,"role":"Stock Manager"},{"read":1,"report":1,"role":"Accounts User"},{"read":1,"report":1,"role":"Accounts Manager"}],
+ "sort_field": "modified", "sort_order": "DESC", "states": []
+}

@@ -89,11 +89,17 @@ def _attach_component_rate(row, movements, identity):
     unaccounted = _number(row.get("unaccounted_remaining_qty"))
     if issues or suggested_rate is None:
         readiness = "REVIEW_DISPATCH_COST_EVIDENCE"
-    elif unaccounted is not None and unaccounted > 0:
+    elif unaccounted is not None and unaccounted > 0 and not (
+        row.get("material_disposition_current")
+        and (row.get("persisted_material_disposition") or {}).get("disposition")
+            == "RETAINED_BY_PROCESSOR"
+    ):
         # A physical balance is not automatically a sale.  Return, material
         # credit/carry-forward, sale, or another controlled disposition must be
         # established before classification or commercial execution.
         readiness = "DEFINE_MATERIAL_DISPOSITION"
+    elif unaccounted is not None and unaccounted > 0:
+        readiness = "PERSIST_COMMERCIAL_CLASSIFICATION"
     elif not classification:
         readiness = "PERSIST_COMMERCIAL_CLASSIFICATION"
     elif classification == "NO_COMMERCIAL_ACTION_REQUIRED":

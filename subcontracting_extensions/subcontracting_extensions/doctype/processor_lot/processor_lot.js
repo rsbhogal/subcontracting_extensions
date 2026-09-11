@@ -490,6 +490,7 @@ function j19_decision_label(code) {
         DUPLICATE_COMPONENT_IDENTITY: "Duplicate component identity",
         DUPLICATE_FINISHED_ITEM_IDENTITY: "Duplicate finished-item identity",
         REVIEW_PERSISTED_COMMERCIAL_CLASSIFICATION: "Review persisted commercial classification",
+        REVIEW_PERSISTED_MATERIAL_DISPOSITION: "Review persisted material disposition",
         DUPLICATE_COMMERCIAL_CLASSIFICATION_SCOPE: "Duplicate commercial classification scope",
         INVALID_COMMERCIAL_CLASSIFICATION_SCOPE: "Invalid commercial classification scope",
         ORPHANED_COMMERCIAL_CLASSIFICATION_SCOPE: "Orphaned commercial classification scope",
@@ -502,6 +503,9 @@ function j19_decision_label(code) {
         REVIEW_DISPATCH_COST_EVIDENCE: "Review historical dispatch-cost evidence",
         PERSIST_COMMERCIAL_CLASSIFICATION: "Persist commercial classification",
         DEFINE_MATERIAL_DISPOSITION: "Define material disposition before commercial classification",
+        PENDING_INVESTIGATION: "Pending investigation",
+        RETAINED_BY_PROCESSOR: "Retained by processor",
+        MATERIAL_DISPOSITION_QUANTITY_STALE: "Material disposition quantity is stale",
         NO_COMMERCIAL_EXECUTION_REQUIRED: "No commercial execution required",
         SELECT_COMMERCIAL_TREATMENT: "Select commercial treatment",
         DEFINE_COMMERCIAL_RECOVERY_QUANTITY: "Define an authoritative commercial recovery quantity",
@@ -562,6 +566,28 @@ function j19_decision_actions_html(row, scope_type, index) {
             __("Records a decision only; no document or lot closure is authorised."))}</div>`;
 }
 
+function j19_material_disposition_html(row, index) {
+    const evidence = row.persisted_material_disposition || {};
+    const capability = row.material_disposition_capability || {};
+    const current = evidence.disposition
+        ? `<div>${j14_badge(j19_decision_label(evidence.disposition), "blue")}</div>
+           <div class="text-muted">${j14_qty(evidence.disposition_qty)} ${j14_escape(evidence.stock_uom)} ·
+           ${j14_escape(__("Revision"))} ${j14_escape(evidence.disposition_revision || 0)}</div>`
+        : `<div style="font-weight:600;color:#b7791f">${j14_escape(__("Not defined"))}</div>
+           <div style="margin-top:4px">${j14_badge(__("Action required"), "amber")}</div>`;
+    if (!capability.entry_available) return current;
+    const button_class = evidence.disposition ? "btn-default" : "btn-primary";
+    const button_style = evidence.disposition
+        ? "margin-top:5px;background:#f1f3f5;border-color:#9aa4ad;color:#36414c;font-weight:500"
+        : "margin-top:5px";
+    const button_label = evidence.disposition
+        ? __("Revise Disposition") : __("Define Material Disposition");
+    return `${current}<button type="button" class="btn btn-xs ${button_class}" style="${button_style}"
+        data-j19-disposition data-j19-index="${index}">${j14_escape(button_label)}</button>
+        <div class="text-muted" style="margin-top:5px">${j14_escape(__(
+            "Records the full residual as evidence only; no document or lot closure is authorised."))}</div>`;
+}
+
 function build_j19_commercial_summary(report) {
     const scopes = [
         ...(report.finished_items || []).map((row, index) => ({row, index, scope_type: "Finished Item"})),
@@ -571,7 +597,9 @@ function build_j19_commercial_summary(report) {
     const pending = scopes.filter(scope => {
         const persisted = scope.row.persisted_classification || {};
         const capability = scope.row.decision_capability || {};
-        return (!persisted.classification && capability.classification_entry_available)
+        const disposition = scope.row.material_disposition_capability || {};
+        return disposition.entry_available
+            || (!persisted.classification && capability.classification_entry_available)
             || (persisted.classification && capability.treatment_selection_available
                 && !persisted.selected_treatment_method);
     });
@@ -587,7 +615,9 @@ function build_j19_commercial_summary(report) {
             persisted.classification
                 ? j14_escape(persisted.classification)
                 : j14_badge(__("Not classified"), "neutral"),
-            j19_decision_actions_html(row, scope.scope_type, scope.index),
+            scope.scope_type === "Raw Material" && row.material_disposition_capability?.entry_available
+                ? j19_material_disposition_html(row, scope.index)
+                : j19_decision_actions_html(row, scope.scope_type, scope.index),
         ];
     });
     return `<div data-j19-commercial-preview style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
@@ -599,7 +629,7 @@ function build_j19_commercial_summary(report) {
                 : pending.length
                     ? __("Only scopes needing a decision are shown below.")
                     : __("No commercial decision currently requires attention."))}</p>
-        ${report.commercial_decision_entry_enabled && pending.length ? j14_table(
+        ${(report.commercial_decision_entry_enabled || report.material_disposition_entry_enabled) && pending.length ? j14_table(
             ["Scope", "Item", "UOM", "Evidence", "Current Decision", "Action"], pending_rows
         ) : ""}
         <p class="text-muted">${j14_escape(__(
@@ -648,7 +678,7 @@ function build_j19_commercial_panel(report, detailed = false) {
         j14_escape(row.component_item), j14_escape(row.stock_uom), j14_qty(row.physical_remaining_qty),
         j14_qty(row.applied_credit_qty), j14_qty(row.unaccounted_remaining_qty),
         j19_decision_html(row.commercial_decision_code, row.commercial_review_permitted),
-        j19_persisted_classification_html(row.persisted_classification),
+        `${j19_material_disposition_html(row, index)}<div style="margin-top:8px">${j19_persisted_classification_html(row.persisted_classification)}</div>`,
         dispatch_cost_evidence(row),
         j19_decision_actions_html(row, "Raw Material", index),
     ]);
@@ -679,7 +709,7 @@ function build_j19_commercial_panel(report, detailed = false) {
             : __("Read-only preview. No commercial document or lot closure is authorised."))}</p>
         ${policy_readiness}
         ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Evidence", "Persisted Classification", "Invoice Evidence", "Decision"], finished_rows)}
-        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Evidence", "Persisted Classification", "Dispatch Cost Evidence", "Decision"], component_rows)}
+        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Evidence", "Disposition / Classification", "Dispatch Cost Evidence", "Decision"], component_rows)}
         <p class="text-muted">${j14_escape(__(
             "J19B2A suggests the material-content rate from exact historical dispatch cost. It excludes ABC processing and consumable costs, does not define a recovery quantity, and authorises neither a document nor lot closure."))}</p>
         ${policy ? `<div>${j14_badge(__("Settlement policy requires review"), "amber")}<ul>${policy}</ul></div>` : ""}
@@ -699,6 +729,49 @@ function j19_bind_decision_actions(frm, wrapper) {
         if (!row) return;
         j19_open_decision_dialog(frm, row, scope_type, button.dataset.j19Decision, button);
     });
+    const dispositions = wrapper?.find?.("[data-j19-disposition]");
+    dispositions?.off?.("click.j19b2b").on?.("click.j19b2b", function () {
+        const row = (frm.__j19_commercial_report?.components || [])[Number(this.dataset.j19Index)];
+        if (row) j19_open_material_disposition_dialog(frm, row, this);
+    });
+}
+
+function j19_open_material_disposition_dialog(frm, row, button) {
+    const capability = row.material_disposition_capability || {};
+    const persisted = row.persisted_material_disposition || {};
+    const choices = capability.allowed_dispositions || [];
+    if (!choices.length) return;
+    frappe.prompt([
+        {fieldtype: "HTML", fieldname: "evidence", options:
+            `<p><strong>${j14_escape(row.component_item)}</strong> · ${j14_qty(
+                capability.exact_disposition_qty)} ${j14_escape(row.stock_uom)}</p>
+             <p class="text-muted">${j14_escape(__(
+                 "The quantity is the complete current unaccounted residual and cannot be edited. Post returns or carry-forward evidence first. This action creates no commercial, stock, or accounting document and does not authorise lot closure."))}</p>`},
+        {fieldtype: "Select", fieldname: "disposition", label: __("Material Disposition"),
+            reqd: 1, options: choices.map(choice => choice.label).join("\n")},
+        {fieldtype: "Small Text", fieldname: "reason", label: __("Decision Reason"), reqd: 1},
+    ], async values => {
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+            await frappe.call({
+                method: "subcontracting_extensions.material_reconciliation_ui.record_component_material_disposition",
+                args: {
+                    processor_lot: frm.doc.name,
+                    scope_identity: {sco_supplied_item: row.sco_supplied_item,
+                        sco_finished_item: row.sco_finished_item,
+                        component_item: row.component_item, stock_uom: row.stock_uom},
+                    disposition: (choices.find(choice => choice.label === values.disposition) || {}).value,
+                    reason: values.reason,
+                    expected_revision: persisted.disposition_revision || 0,
+                    expected_last_event: persisted.last_disposition_event || null,
+                }, freeze: true, freeze_message: __("Recording material disposition"),
+            });
+            await render_j14_material_panel(frm);
+        } finally {
+            button.disabled = false;
+        }
+    }, __("Record Controlled Material Disposition"), __("Record Disposition"));
 }
 
 function j19_open_decision_dialog(frm, row, scope_type, action, button) {

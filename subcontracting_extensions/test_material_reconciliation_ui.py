@@ -68,6 +68,10 @@ class TestMaterialReconciliationUI(unittest.TestCase):
             side_effect=lambda api, report, enabled: dict(
                 report, commercial_decision_entry_enabled=enabled)
         )
+        self.module.attach_material_disposition_capabilities = Mock(
+            side_effect=lambda api, report, enabled: dict(
+                report, material_disposition_entry_enabled=enabled)
+        )
 
     def test_disabled_by_default_without_evidence_reads(self):
         self.assertEqual(self.module.get_material_panel("LOT"), {"enabled": False})
@@ -217,6 +221,40 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.assertTrue(result["commercial_decision_entry_enabled"])
         self.assertTrue(self.module.attach_decision_capabilities.call_args.kwargs["enabled"])
 
+    def test_material_disposition_flag_enables_only_disposition_capabilities(self):
+        self.frappe.conf.update(v2_component_commercial_preview=1,
+                                v2_component_material_disposition=1)
+        result = self.module.get_commercial_preview_panel("LOT")
+        self.assertTrue(result["material_disposition_entry_enabled"])
+        self.assertFalse(result["commercial_decision_entry_enabled"])
+        self.assertTrue(
+            self.module.attach_material_disposition_capabilities.call_args.kwargs["enabled"])
+
+    def test_material_disposition_persistence_is_flag_guarded_and_delegated(self):
+        self.frappe.throw = Mock(side_effect=RuntimeError)
+        identity = '{"sco_supplied_item":"RM-A","sco_finished_item":"FG-A"}'
+        with self.assertRaises(RuntimeError):
+            self.module.record_component_material_disposition(
+                "LOT", identity, "RETAINED_BY_PROCESSOR", "Supplier confirmed")
+
+        self.frappe.conf["v2_component_material_disposition"] = 1
+        self.module.persist_material_disposition = Mock(return_value={
+            "commercial_document_authorized": False,
+            "stock_document_authorized": False,
+            "lot_closure_authorized": False,
+        })
+        result = self.module.record_component_material_disposition(
+            "LOT", identity, "RETAINED_BY_PROCESSOR", "Supplier confirmed",
+            2, "PLMDE-00002")
+        args = self.module.persist_material_disposition.call_args.args
+        self.assertIs(args[0], self.frappe)
+        self.assertIs(args[1], self.module.get_component_commercial_preview)
+        self.assertEqual(args[2], "LOT")
+        self.assertEqual(args[3]["sco_supplied_item"], "RM-A")
+        self.assertEqual(args[-2:], (2, "PLMDE-00002"))
+        self.assertFalse(result["commercial_document_authorized"])
+        self.assertFalse(result["stock_document_authorized"])
+
     def check_single_item_routing(self, enabled):
         spec = importlib.util.spec_from_file_location("j14_position_under_test",
             Path(__file__).with_name("receipt_item_position.py"))
@@ -248,7 +286,7 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.check_single_item_routing(0)
 
     def test_whitelist_does_not_enable_guest_access(self):
-        self.assertEqual(self.frappe.whitelist.call_count, 6)
+        self.assertEqual(self.frappe.whitelist.call_count, 7)
 
 
 if __name__ == "__main__":
