@@ -30,6 +30,9 @@ from subcontracting_extensions.component_material_disposition import (
     attach_material_disposition_capabilities,
     record_material_disposition as persist_material_disposition,
 )
+from subcontracting_extensions.retained_material_policy_reconciliation import (
+    reconcile_retained_material_policy as persist_retained_material_policy_reconciliation,
+)
 
 
 @frappe.whitelist()
@@ -121,6 +124,37 @@ def record_commercial_decision(processor_lot, scope_type, scope_identity,
         expected_treatment_revision,
         expected_last_decision_event,
     )
+
+
+@frappe.whitelist()
+def reconcile_retained_material_policy(
+    processor_lot, scope_identity, target_shortage_settlement_method,
+    target_recovery_customer, reason, expected_purchase_order_modified,
+    expected_processor_lot_modified, expected_supplier_modified,
+    expected_customer_modified, expected_purchase_order_policy,
+    expected_processor_lot_policy, expected_recovery_quantity,
+    expected_disposition_revision, expected_last_disposition_event,
+    expected_classification_revision, expected_treatment_revision,
+    expected_last_decision_event,
+):
+    """Feature-gated J19B2E policy reconciliation; never executes settlement."""
+    if not cint(frappe.conf.get("v2_retained_material_policy_reconciliation")):
+        frappe.throw("Retained-material policy reconciliation is not enabled")
+    return persist_retained_material_policy_reconciliation(
+        frappe, get_component_commercial_preview, processor_lot,
+        _parse_json(scope_identity), target_shortage_settlement_method,
+        target_recovery_customer, reason, expected_purchase_order_modified,
+        expected_processor_lot_modified, expected_supplier_modified,
+        expected_customer_modified, _parse_json(expected_purchase_order_policy),
+        _parse_json(expected_processor_lot_policy), expected_recovery_quantity,
+        expected_disposition_revision, expected_last_disposition_event,
+        expected_classification_revision, expected_treatment_revision,
+        expected_last_decision_event,
+    )
+
+
+def _parse_json(value):
+    return frappe.parse_json(value) if isinstance(value, str) else value
 
 
 def _read_component_return_report(processor_lot):
