@@ -11,7 +11,11 @@
   "policy_controls_section",
   "allow_processor_lot_policy_override",
   "require_recovery_customer_for_sales_invoice",
-  "require_resolved_excess_ownership"
+  "require_resolved_excess_ownership",
+  "invoice_number_coordination_section",
+  "sales_invoice_number_coordination_mode",
+  "external_invoice_system_name",
+  "outward_sales_invoice_series"
  ],
  "fields": [
   {
@@ -58,6 +62,34 @@
    "fieldtype": "Check",
    "label": "Require Resolved Ownership for Excess",
    "read_only": 1
+  },
+  {
+   "fieldname": "invoice_number_coordination_section",
+   "fieldtype": "Section Break",
+   "label": "Transitional Sales Invoice Number Coordination"
+  },
+  {
+   "default": "DISABLED",
+   "description": "Temporary parallel-working control. Forecasting never reserves or allocates an invoice number.",
+   "fieldname": "sales_invoice_number_coordination_mode",
+   "fieldtype": "Select",
+   "label": "Sales Invoice Number Coordination Mode",
+   "options": "DISABLED\nERPNEXT_FORECAST_WITH_TALLY_COORDINATION",
+   "reqd": 1
+  },
+  {
+   "default": "Tally",
+   "depends_on": "eval:doc.sales_invoice_number_coordination_mode=='ERPNEXT_FORECAST_WITH_TALLY_COORDINATION'",
+   "fieldname": "external_invoice_system_name",
+   "fieldtype": "Data",
+   "label": "External Invoice System"
+  },
+  {
+   "depends_on": "eval:doc.sales_invoice_number_coordination_mode=='ERPNEXT_FORECAST_WITH_TALLY_COORDINATION'",
+   "description": "Current outward-invoice pattern, for example U-I/26-27/####. Update it at the financial-year transition.",
+   "fieldname": "outward_sales_invoice_series",
+   "fieldtype": "Data",
+   "label": "Outward Sales Invoice Series"
   }
  ],
  "grid_page_length": 50,

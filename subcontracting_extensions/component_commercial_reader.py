@@ -12,6 +12,11 @@ from subcontracting_extensions.component_commercial_execution_preview import (
 from subcontracting_extensions.component_retained_material_readiness import (
     attach_retained_material_treatment_readiness,
 )
+from subcontracting_extensions.retained_material_sales_invoice_readiness import (
+    COORDINATION_TALLY,
+    attach_sales_invoice_draft_readiness,
+    forecast_invoice_number,
+)
 from subcontracting_extensions.component_material_disposition import (
     attach_material_dispositions,
 )
@@ -116,6 +121,15 @@ def _read_component_commercial_preview(
         result,
         _retained_material_readiness_context(api, lot, po, sco, result, policy),
     )
+    selected_sale = any(
+        (row.get("persisted_classification") or {}).get("selected_treatment_method")
+        == "SALES_INVOICE" for row in (result.get("components") or [])
+    )
+    result = attach_sales_invoice_draft_readiness(
+        result,
+        _sales_invoice_draft_readiness_context(api, lot, po, sco, result)
+        if selected_sale else {},
+    )
     if classification_issues or result.get("material_disposition_issues"):
         result["commercial_review_permitted"] = False
         result["commercial_decision_code"] = (
@@ -142,6 +156,105 @@ def _read_component_commercial_preview(
         lot_closure_authorized=False,
     )
     return result
+
+
+def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
+    """Read J19B2G facts without constructing an invoice or allocating a name."""
+    customer_name = po.get("custom_recovery_customer")
+    customer_address = None
+    if customer_name:
+        links = api.get_all(
+            "Dynamic Link",
+            filters={"link_doctype": "Customer", "link_name": customer_name,
+                     "parenttype": "Address"},
+            fields=["parent"], limit_page_length=2,
+        )
+        if len(links) == 1:
+            customer_address = links[0].get("parent")
+
+    retained_rows = [
+        row for row in (report.get("components") or [])
+        if (row.get("persisted_classification") or {}).get("selected_treatment_method")
+        == "SALES_INVOICE"
+    ]
+    scope_key = retained_rows[0].get("commercial_scope_key") if len(retained_rows) == 1 else None
+    item_code = retained_rows[0].get("component_item") if len(retained_rows) == 1 else None
+    classification = (
+        retained_rows[0].get("persisted_classification") or {}
+        if len(retained_rows) == 1 else {}
+    )
+
+    try:
+        company = api.get_doc("Company", sco.get("company"))
+    except (KeyError, TypeError):
+        company = {}
+    try:
+        item = api.get_doc("Item", item_code) if item_code else None
+    except (KeyError, TypeError):
+        item = None
+    income_account = item and item.get("income_account")
+    if item:
+        for default in item.get("item_defaults") or []:
+            if default.get("company") == sco.get("company") and default.get("income_account"):
+                income_account = default.get("income_account")
+                break
+    income_account = income_account or company.get("default_income_account")
+
+    reconciliation = api.get_all(
+        "Processor Lot Policy Reconciliation Event",
+        filters={"processor_lot": lot.name, "scope_key": scope_key},
+        fields=["name"], limit_page_length=2,
+    ) if scope_key else []
+    duplicates = api.get_all(
+        "Sales Invoice Item",
+        filters={"custom_processor_lot_scope_key": scope_key, "docstatus": ["!=", 2]},
+        fields=["parent", "name", "docstatus"], limit_page_length=0,
+    ) if scope_key else []
+
+    try:
+        settings = api.get_single("Subcontracting Settlement Settings")
+    except (AttributeError, KeyError, TypeError):
+        settings = {}
+    mode = settings.get("sales_invoice_number_coordination_mode") or "DISABLED"
+    pattern = settings.get("outward_sales_invoice_series")
+    forecast = None
+    stale = []
+    if mode == COORDINATION_TALLY:
+        try:
+            import re
+            match = re.fullmatch(r"(.*?)(#+)", str(pattern or ""))
+            if not match:
+                raise ValueError("OUTWARD_SALES_INVOICE_SERIES_INVALID")
+            prefix = match.group(1)
+            rows = api.db.sql(
+                "SELECT `current` FROM `tabSeries` WHERE `name`=%s LIMIT 1",
+                (prefix,), as_dict=True,
+            )
+            current = rows[0].get("current") if rows else None
+            names = api.get_all(
+                "Sales Invoice", filters={"name": ["like", prefix + "%"]},
+                pluck="name", limit_page_length=0,
+            )
+            forecast = forecast_invoice_number(pattern, current, names)
+        except (ValueError, TypeError, KeyError) as exc:
+            stale.append(str(exc))
+
+    return {
+        "processor_lot": lot.name, "scope_key": scope_key,
+        "company": sco.get("company"), "customer": customer_name,
+        "customer_address": customer_address, "item_code": item_code,
+        "warehouse": sco.get("supplier_warehouse"), "income_account": income_account,
+        "cost_center": lot.get("cost_center") or company.get("cost_center"),
+        "branch": lot.get("branch"),
+        "decision_event": classification.get("last_decision_event"),
+        "policy_reconciliation_event": (
+            reconciliation[0].get("name") if len(reconciliation) == 1 else None
+        ),
+        "duplicate_documents": duplicates, "stale_state_issues": stale,
+        "coordination_mode": mode,
+        "external_system_name": settings.get("external_invoice_system_name") or "Tally",
+        "invoice_number_forecast": forecast,
+    }
 
 
 def _retained_material_readiness_context(api, lot, po, sco, report, policy):

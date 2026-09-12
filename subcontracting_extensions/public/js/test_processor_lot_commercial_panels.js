@@ -213,6 +213,30 @@ function commercial() {
     assert(html.includes("Recovery Customer is not snapshotted on the Purchase Order"));
     assert(html.includes("Deferred to standard ERPNext Sales Invoice tax resolution"));
     assert(!html.includes("Create Sales Invoice"));
+    retained.components[1].persisted_classification.selected_treatment_method = "SALES_INVOICE";
+    retained.components[1].retained_material_sales_invoice_draft_readiness = {
+        applicable: true,
+        readiness_code: "SALES_INVOICE_DRAFT_FACTS_READY_FUTURE_CREATION_DEFERRED",
+        blocking_issues: [],
+        draft_values: {
+            customer: "Shiv <unsafe>", item_code: "Wire Rod <unsafe>", qty: 20000,
+            uom: "Kg", rate: 58.35, net_amount_excluding_tax: 1167000,
+            warehouse: "Processor <unsafe>", update_stock: 1,
+        },
+        invoice_number_forecast: {
+            forecast_number: "U-I/26-27/0017", forecast_status: "FORECAST_ONLY_NOT_RESERVED",
+        },
+        tally_reservation_confirmation_required_before_draft_creation: true,
+    };
+    html = context.build_j19_commercial_panel(retained, true);
+    assert(html.includes("Sales Invoice draft readiness"));
+    assert(html.includes("CRITICAL — TALLY NUMBER COORDINATION REQUIRED"));
+    assert(html.includes("U-I/26-27/0017"));
+    assert(html.includes("Forecast only—not reserved"));
+    assert(html.includes("Shiv &lt;unsafe&gt;") && !html.includes("Shiv <unsafe>"));
+    assert(html.includes("Wire Rod &lt;unsafe&gt;") && !html.includes("Wire Rod <unsafe>"));
+    assert(!html.includes("Reserve Invoice Number"));
+    assert(!html.includes("Create Sales Invoice"));
     assert(!html.includes("Commercial treatment deferred beyond J19B2C"));
     assert(html.includes("J19B2D validates the exact retained-material recovery quantity"));
     assert(!html.includes("Settlement policy requires review"));

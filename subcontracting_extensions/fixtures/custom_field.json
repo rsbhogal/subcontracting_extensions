@@ -733,5 +733,81 @@
     "options": "Customer",
     "depends_on": "eval:doc.is_subcontracted == 1",
     "description": "Inherited from the Supplier master and required for Sales Invoice settlement treatment."
+  },
+  {
+    "doctype": "Custom Field", "dt": "Sales Invoice",
+    "fieldname": "custom_processor_lot_settlement", "fieldtype": "Link",
+    "insert_after": "return_against", "label": "Processor Lot Settlement",
+    "module": "Subcontracting Extensions",
+    "name": "Sales Invoice-custom_processor_lot_settlement",
+    "options": "Processor Lot", "read_only": 1, "no_copy": 1, "print_hide": 1
+  },
+  {
+    "doctype": "Custom Field", "dt": "Sales Invoice Item",
+    "fieldname": "custom_processor_lot_scope_key", "fieldtype": "Data",
+    "insert_after": "warehouse", "label": "Processor Lot Scope Key",
+    "module": "Subcontracting Extensions",
+    "name": "Sales Invoice Item-custom_processor_lot_scope_key",
+    "read_only": 1, "no_copy": 1, "print_hide": 1, "search_index": 1
+  },
+  {
+    "doctype": "Custom Field", "dt": "Sales Invoice Item",
+    "fieldname": "custom_material_disposition", "fieldtype": "Link",
+    "insert_after": "custom_processor_lot_scope_key", "label": "Material Disposition",
+    "module": "Subcontracting Extensions",
+    "name": "Sales Invoice Item-custom_material_disposition",
+    "options": "Processor Lot Material Disposition", "read_only": 1,
+    "no_copy": 1, "print_hide": 1
+  },
+  {
+    "doctype": "Custom Field", "dt": "Sales Invoice Item",
+    "fieldname": "custom_commercial_classification", "fieldtype": "Link",
+    "insert_after": "custom_material_disposition", "label": "Commercial Classification",
+    "module": "Subcontracting Extensions",
+    "name": "Sales Invoice Item-custom_commercial_classification",
+    "options": "Processor Lot Commercial Classification", "read_only": 1,
+    "no_copy": 1, "print_hide": 1
+  },
+  {
+    "doctype": "Custom Field", "dt": "Sales Invoice Item",
+    "fieldname": "custom_policy_reconciliation_event", "fieldtype": "Link",
+    "insert_after": "custom_commercial_classification", "label": "Policy Reconciliation Event",
+    "module": "Subcontracting Extensions",
+    "name": "Sales Invoice Item-custom_policy_reconciliation_event",
+    "options": "Processor Lot Policy Reconciliation Event", "read_only": 1,
+    "no_copy": 1, "print_hide": 1
+  },
+  {
+    "doctype": "Custom Field", "dt": "Sales Invoice Item",
+    "fieldname": "custom_treatment_decision_event", "fieldtype": "Link",
+    "insert_after": "custom_policy_reconciliation_event", "label": "Treatment Decision Event",
+    "module": "Subcontracting Extensions",
+    "name": "Sales Invoice Item-custom_treatment_decision_event",
+    "options": "Processor Lot Commercial Decision Event", "read_only": 1,
+    "no_copy": 1, "print_hide": 1
+  },
+  {
+    "doctype": "Custom Field", "dt": "Sales Invoice Item",
+    "fieldname": "custom_disposition_revision", "fieldtype": "Int",
+    "insert_after": "custom_treatment_decision_event", "label": "Disposition Revision",
+    "module": "Subcontracting Extensions",
+    "name": "Sales Invoice Item-custom_disposition_revision",
+    "read_only": 1, "no_copy": 1, "print_hide": 1
+  },
+  {
+    "doctype": "Custom Field", "dt": "Sales Invoice Item",
+    "fieldname": "custom_classification_revision", "fieldtype": "Int",
+    "insert_after": "custom_disposition_revision", "label": "Classification Revision",
+    "module": "Subcontracting Extensions",
+    "name": "Sales Invoice Item-custom_classification_revision",
+    "read_only": 1, "no_copy": 1, "print_hide": 1
+  },
+  {
+    "doctype": "Custom Field", "dt": "Sales Invoice Item",
+    "fieldname": "custom_treatment_revision", "fieldtype": "Int",
+    "insert_after": "custom_classification_revision", "label": "Treatment Revision",
+    "module": "Subcontracting Extensions",
+    "name": "Sales Invoice Item-custom_treatment_revision",
+    "read_only": 1, "no_copy": 1, "print_hide": 1
   }
 ]

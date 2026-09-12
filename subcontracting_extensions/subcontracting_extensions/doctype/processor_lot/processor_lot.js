@@ -533,6 +533,10 @@ function j19_decision_label(code) {
         RETAINED_MATERIAL_STOCK_SCOPE_AMBIGUOUS: "Multiple retained scopes share the supplier-warehouse stock position",
         RETAINED_MATERIAL_PROCESSOR_RESPONSIBILITY_NOT_READY: "Processor-responsibility classification is not ready",
         DEFERRED_TO_STANDARD_ERPNEXT_SALES_INVOICE_TAX_RESOLUTION: "Deferred to standard ERPNext Sales Invoice tax resolution",
+        SALES_INVOICE_DRAFT_FACTS_READY_FUTURE_CREATION_DEFERRED: "Sales Invoice draft facts are ready; creation remains deferred",
+        SALES_INVOICE_DRAFT_FACTS_NOT_READY: "Sales Invoice draft facts require review",
+        EXISTING_RETAINED_MATERIAL_SALES_INVOICE: "An existing Sales Invoice already carries this exact scope",
+        TALLY_INVOICE_NUMBER_FORECAST_NOT_READY: "Tally invoice-number forecast is not ready",
     };
     return __(labels[code] || code || "Commercial evidence requires review");
 }
@@ -640,6 +644,39 @@ function j19_retained_treatment_readiness_html(row) {
         ${issues ? `<div>${j14_badge(__("Readiness blockers"), "amber")}<ul>${issues}</ul></div>` : ""}
         <p class="text-muted">${j14_escape(__(
             "Future design only: Update Stock = 1. No treatment selection, Sales Invoice, stock posting, accounting posting, or lot closure is authorised."))}</p>
+    </div>`;
+}
+
+function j19_sales_invoice_draft_readiness_html(row) {
+    const readiness = row.retained_material_sales_invoice_draft_readiness || {};
+    if (!readiness.applicable) return "";
+    const draft = readiness.draft_values || {};
+    const forecast = readiness.invoice_number_forecast || {};
+    const issues = (readiness.blocking_issues || []).map(code =>
+        `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
+    const warning = readiness.tally_reservation_confirmation_required_before_draft_creation
+        ? `<div class="alert alert-danger" style="margin-top:10px;font-weight:700">
+            ${j14_escape(__("CRITICAL — TALLY NUMBER COORDINATION REQUIRED"))}<br>
+            ${j14_escape(__("Expected next outward Sales Invoice number"))}: ${j14_escape(
+                forecast.forecast_number || "—")}<br>
+            <span style="font-weight:400">${j14_escape(__(
+                "Forecast only—not reserved. Reserve the confirmed number in Tally before future draft creation."))}</span>
+           </div>` : "";
+    return `<div style="margin:10px 0">
+        <div style="font-size:14px;font-weight:600;margin-bottom:6px">${j14_escape(__("Sales Invoice draft readiness"))}</div>
+        <div>${j14_badge(j19_decision_label(readiness.readiness_code),
+            readiness.blocking_issues?.length ? "amber" : "green")}</div>
+        ${j14_table(["Customer", "Item", "Quantity", "Rate", "Net Amount", "Warehouse"], [[
+            j14_escape(draft.customer || "—"), j14_escape(draft.item_code || "—"),
+            `${j14_qty(draft.qty)} ${j14_escape(draft.uom || "")}`,
+            draft.rate == null ? "—" : j14_qty(draft.rate),
+            draft.net_amount_excluding_tax == null ? "—" : j14_qty(draft.net_amount_excluding_tax),
+            j14_escape(draft.warehouse || "—"),
+        ]])}
+        ${warning}
+        ${issues ? `<div>${j14_badge(__("Readiness blockers"), "amber")}<ul>${issues}</ul></div>` : ""}
+        <p class="text-muted">${j14_escape(__(
+            "Read-only forecast: no invoice number is reserved and no Sales Invoice, stock, accounting, tax, or lot-closure action is authorised."))}</p>
     </div>`;
 }
 
@@ -794,6 +831,7 @@ function build_j19_commercial_panel(report, detailed = false) {
         ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Evidence", "Persisted Classification", "Invoice Evidence", "Decision"], finished_rows)}
         ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Evidence", "Disposition / Classification", "Dispatch Cost Evidence", "Decision"], component_rows)}
         ${(report.components || []).map(j19_retained_treatment_readiness_html).join("")}
+        ${(report.components || []).map(j19_sales_invoice_draft_readiness_html).join("")}
         <p class="text-muted">${j14_escape(material_rate_note)}</p>
         ${policy && !retained_readiness_present ? `<div>${j14_badge(__("Settlement policy requires review"), "amber")}<ul>${policy}</ul></div>` : ""}
         ${classification_issues ? `<div>${j14_badge(__("Persisted classification requires review"), "amber")}<ul>${classification_issues}</ul></div>` : ""}
