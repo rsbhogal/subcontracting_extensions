@@ -87,6 +87,12 @@ app_include_js = [
 ]
 
 doc_events = {
+	"Sales Invoice": {
+		"validate": (
+			"subcontracting_extensions.sales_invoice_number_reservation."
+			"protect_reserved_sales_invoice_number"
+		),
+	},
 	"Subcontracting Order": {
 		"before_validate": (
 			"subcontracting_extensions.scripts.subcontracting_order."

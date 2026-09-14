@@ -15,7 +15,11 @@ from subcontracting_extensions.component_retained_material_readiness import (
 from subcontracting_extensions.retained_material_sales_invoice_readiness import (
     COORDINATION_TALLY,
     attach_sales_invoice_draft_readiness,
-    forecast_invoice_number,
+)
+from subcontracting_extensions.document_naming_rule_resolver import (
+    forecast_from_naming_rule,
+    naming_rule_snapshot,
+    resolve_document_naming_rule,
 )
 from subcontracting_extensions.component_material_disposition import (
     attach_material_dispositions,
@@ -210,6 +214,13 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
         filters={"custom_processor_lot_scope_key": scope_key, "docstatus": ["!=", 2]},
         fields=["parent", "name", "docstatus"], limit_page_length=0,
     ) if scope_key else []
+    reservations = api.get_all(
+        "Processor Lot Sales Invoice Number Reservation",
+        filters={"scope_key": scope_key},
+        fields=["name", "reserved_invoice_number", "naming_rule",
+                "tally_confirmation_status", "reserved_by", "reserved_at"],
+        limit_page_length=2,
+    ) if scope_key else []
 
     try:
         settings = api.get_single("Subcontracting Settlement Settings")
@@ -218,24 +229,36 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
     mode = settings.get("sales_invoice_number_coordination_mode") or "DISABLED"
     pattern = settings.get("outward_sales_invoice_series")
     forecast = None
+    rule_snapshot = None
     stale = []
     if mode == COORDINATION_TALLY:
         try:
-            import re
-            match = re.fullmatch(r"(.*?)(#+)", str(pattern or ""))
-            if not match:
-                raise ValueError("OUTWARD_SALES_INVOICE_SERIES_INVALID")
-            prefix = match.group(1)
-            rows = api.db.sql(
-                "SELECT `current` FROM `tabSeries` WHERE `name`=%s LIMIT 1",
-                (prefix,), as_dict=True,
+            rules = []
+            for reference in api.get_all(
+                "Document Naming Rule", fields=["name"], limit_page_length=0
+            ):
+                rule = api.get_doc("Document Naming Rule", reference.get("name"))
+                if rule.get("document_type") == "Sales Invoice":
+                    rules.append(rule.as_dict())
+            resolved = resolve_document_naming_rule(
+                rules, "Sales Invoice",
+                {"company": sco.get("company"), "is_return": 0,
+                 "custom_is_debitservice": 0},
             )
-            current = rows[0].get("current") if rows else None
-            names = api.get_all(
-                "Sales Invoice", filters={"name": ["like", prefix + "%"]},
-                pluck="name", limit_page_length=0,
+            rule_snapshot = naming_rule_snapshot(resolved)
+            resolved_pattern = (
+                resolved.get("prefix") + "#" * int(resolved.get("prefix_digits") or 0)
             )
-            forecast = forecast_invoice_number(pattern, current, names)
+            if pattern != resolved_pattern:
+                raise ValueError("CONFIGURED_SERIES_DIFFERS_FROM_DOCUMENT_NAMING_RULE")
+            forecast = {
+                "configured_series": pattern,
+                "forecast_number": forecast_from_naming_rule(resolved),
+                "forecast_source": "DOCUMENT_NAMING_RULE",
+                "forecast_status": "FORECAST_ONLY_NOT_RESERVED",
+                "naming_rule": resolved.get("name"),
+                "naming_rule_snapshot": rule_snapshot,
+            }
         except (ValueError, TypeError, KeyError) as exc:
             stale.append(str(exc))
 
@@ -250,10 +273,12 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
         "policy_reconciliation_event": (
             reconciliation[0].get("name") if len(reconciliation) == 1 else None
         ),
-        "duplicate_documents": duplicates, "stale_state_issues": stale,
+        "duplicate_documents": duplicates, "number_reservations": reservations,
+        "stale_state_issues": stale,
         "coordination_mode": mode,
         "external_system_name": settings.get("external_invoice_system_name") or "Tally",
         "invoice_number_forecast": forecast,
+        "naming_rule_snapshot": rule_snapshot,
     }
 
 

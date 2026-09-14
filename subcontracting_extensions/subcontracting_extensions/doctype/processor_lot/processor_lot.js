@@ -537,6 +537,8 @@ function j19_decision_label(code) {
         SALES_INVOICE_DRAFT_FACTS_NOT_READY: "Sales Invoice draft facts require review",
         EXISTING_RETAINED_MATERIAL_SALES_INVOICE: "An existing Sales Invoice already carries this exact scope",
         TALLY_INVOICE_NUMBER_FORECAST_NOT_READY: "Tally invoice-number forecast is not ready",
+        SALES_INVOICE_NUMBER_RESERVED_TALLY_CONFIRMATION_PENDING: "Invoice number reserved; Tally confirmation is pending",
+        AMBIGUOUS_SALES_INVOICE_NUMBER_RESERVATION: "Multiple invoice-number reservations exist for this scope",
     };
     return __(labels[code] || code || "Commercial evidence requires review");
 }

@@ -134,6 +134,9 @@ def _assess(row, context):
 
     mode = context.get("coordination_mode") or COORDINATION_DISABLED
     forecast = context.get("invoice_number_forecast")
+    reservations = context.get("number_reservations") or []
+    if len(reservations) > 1:
+        _issue(issues, "AMBIGUOUS_SALES_INVOICE_NUMBER_RESERVATION")
     if mode == COORDINATION_TALLY and not forecast:
         _issue(issues, "TALLY_INVOICE_NUMBER_FORECAST_NOT_READY")
     elif mode not in (COORDINATION_DISABLED, COORDINATION_TALLY):
@@ -158,7 +161,9 @@ def _assess(row, context):
         **base,
         "applicable": True,
         "readiness_code": (
-            "SALES_INVOICE_DRAFT_FACTS_READY_FUTURE_CREATION_DEFERRED"
+            "SALES_INVOICE_NUMBER_RESERVED_TALLY_CONFIRMATION_PENDING"
+            if not issues and len(reservations) == 1
+            else "SALES_INVOICE_DRAFT_FACTS_READY_FUTURE_CREATION_DEFERRED"
             if not issues else "SALES_INVOICE_DRAFT_FACTS_NOT_READY"
         ),
         "blocking_issues": issues,
@@ -179,6 +184,10 @@ def _assess(row, context):
         "invoice_number_coordination_mode": mode,
         "external_invoice_system": context.get("external_system_name") if mode == COORDINATION_TALLY else None,
         "invoice_number_forecast": forecast,
+        "invoice_number_reservation": reservations[0] if len(reservations) == 1 else None,
+        "invoice_number_reservation_available": bool(
+            not issues and mode == COORDINATION_TALLY and not reservations
+        ),
         "tally_reservation_confirmation_required_before_draft_creation": mode == COORDINATION_TALLY,
         "critical_coordination_warning": (
             "Forecast only: reserve the confirmed ERPNext outward Sales Invoice number in Tally before future draft creation."
