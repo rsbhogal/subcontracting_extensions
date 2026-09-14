@@ -228,6 +228,14 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
                 "confirmed_by", "confirmed_at", "reason"],
         limit_page_length=2,
     ) if scope_key else []
+    draft_creation_events = api.get_all(
+        "Processor Lot Sales Invoice Draft Creation Event",
+        filters={"scope_key": scope_key},
+        fields=["name", "sales_invoice", "reservation", "tally_confirmation",
+                "created_by", "created_at", "draft_only", "net_total",
+                "total_taxes_and_charges", "grand_total"],
+        limit_page_length=2,
+    ) if scope_key else []
 
     try:
         settings = api.get_single("Subcontracting Settlement Settings")
@@ -282,6 +290,7 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
         ),
         "duplicate_documents": duplicates, "number_reservations": reservations,
         "number_reservation_confirmations": confirmations,
+        "sales_invoice_draft_creation_events": draft_creation_events,
         "stale_state_issues": stale,
         "coordination_mode": mode,
         "external_system_name": settings.get("external_invoice_system_name") or "Tally",

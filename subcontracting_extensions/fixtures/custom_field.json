@@ -809,5 +809,23 @@
     "module": "Subcontracting Extensions",
     "name": "Sales Invoice Item-custom_treatment_revision",
     "read_only": 1, "no_copy": 1, "print_hide": 1
+  },
+  {
+    "doctype": "Custom Field", "dt": "Sales Invoice",
+    "fieldname": "custom_invoice_number_reservation", "fieldtype": "Link",
+    "insert_after": "custom_processor_lot_settlement", "label": "Invoice Number Reservation",
+    "module": "Subcontracting Extensions",
+    "name": "Sales Invoice-custom_invoice_number_reservation",
+    "options": "Processor Lot Sales Invoice Number Reservation",
+    "read_only": 1, "no_copy": 1, "print_hide": 1
+  },
+  {
+    "doctype": "Custom Field", "dt": "Sales Invoice",
+    "fieldname": "custom_tally_reservation_confirmation", "fieldtype": "Link",
+    "insert_after": "custom_invoice_number_reservation", "label": "Tally Reservation Confirmation",
+    "module": "Subcontracting Extensions",
+    "name": "Sales Invoice-custom_tally_reservation_confirmation",
+    "options": "Processor Lot Sales Invoice Number Confirmation",
+    "read_only": 1, "no_copy": 1, "print_hide": 1
   }
 ]

@@ -156,6 +156,30 @@ class TestDraftReadiness(unittest.TestCase):
         self.assertIn("TALLY_RESERVATION_CONFIRMATION_MISMATCH",
                       readiness["blocking_issues"])
 
+    def test_controlled_draft_projects_submission_deferred(self):
+        context = self.context()
+        context["number_reservations"] = [{
+            "name": "PLSINR-1", "reserved_invoice_number": "U-I/26-27/0017",
+        }]
+        context["number_reservation_confirmations"] = [{
+            "name": "PLSINC-1", "reservation": "PLSINR-1",
+            "reserved_invoice_number": "U-I/26-27/0017",
+            "confirmation_status": "CONFIRMED",
+        }]
+        context["duplicate_documents"] = [{"parent": "U-I/26-27/0017"}]
+        context["sales_invoice_draft_creation_events"] = [{
+            "name": "PLSIDC-1", "sales_invoice": "U-I/26-27/0017",
+            "draft_only": 1,
+        }]
+        readiness = attach_sales_invoice_draft_readiness(
+            {"components": [self.row()]}, context
+        )["components"][0]["retained_material_sales_invoice_draft_readiness"]
+        self.assertEqual(readiness["readiness_code"],
+                         "SALES_INVOICE_DRAFT_CREATED_SUBMISSION_DEFERRED")
+        self.assertEqual(readiness["tax_calculation_status"],
+                         "CALCULATED_ON_DRAFT_NOT_POSTED")
+        self.assertEqual(readiness["blocking_issues"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

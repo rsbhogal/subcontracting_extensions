@@ -541,6 +541,9 @@ function j19_decision_label(code) {
         SALES_INVOICE_NUMBER_RESERVED_IN_TALLY_FUTURE_DRAFT_CREATION_DEFERRED: "Invoice number confirmed reserved in Tally; Sales Invoice creation remains deferred",
         AMBIGUOUS_TALLY_RESERVATION_CONFIRMATION: "Multiple Tally confirmation records exist for this scope",
         TALLY_RESERVATION_CONFIRMATION_MISMATCH: "Tally confirmation does not match the current reservation",
+        SALES_INVOICE_DRAFT_CREATED_SUBMISSION_DEFERRED: "Draft Sales Invoice created; submission and posting remain deferred",
+        AMBIGUOUS_SALES_INVOICE_DRAFT_CREATION_EVIDENCE: "Multiple Sales Invoice draft-creation events exist for this scope",
+        CALCULATED_ON_DRAFT_NOT_POSTED: "Calculated on Draft Sales Invoice; not posted",
         AMBIGUOUS_SALES_INVOICE_NUMBER_RESERVATION: "Multiple invoice-number reservations exist for this scope",
     };
     return __(labels[code] || code || "Commercial evidence requires review");

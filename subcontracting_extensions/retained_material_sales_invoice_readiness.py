@@ -127,8 +127,17 @@ def _assess(row, context):
             _issue(issues, code)
     if context.get("scope_key") != row.get("commercial_scope_key"):
         _issue(issues, "COMMERCIAL_SCOPE_CHANGED")
-    if context.get("duplicate_documents"):
+    duplicate_documents = context.get("duplicate_documents") or []
+    creation_events = context.get("sales_invoice_draft_creation_events") or []
+    controlled_draft_created = bool(
+        len(duplicate_documents) == 1 and len(creation_events) == 1
+        and creation_events[0].get("sales_invoice") == duplicate_documents[0].get("parent")
+        and creation_events[0].get("draft_only")
+    )
+    if duplicate_documents and not controlled_draft_created:
         _issue(issues, "EXISTING_RETAINED_MATERIAL_SALES_INVOICE")
+    if len(creation_events) > 1:
+        _issue(issues, "AMBIGUOUS_SALES_INVOICE_DRAFT_CREATION_EVIDENCE")
     for issue in context.get("stale_state_issues") or []:
         _issue(issues, issue)
 
@@ -170,7 +179,9 @@ def _assess(row, context):
         **base,
         "applicable": True,
         "readiness_code": (
-            "SALES_INVOICE_NUMBER_RESERVED_IN_TALLY_FUTURE_DRAFT_CREATION_DEFERRED"
+            "SALES_INVOICE_DRAFT_CREATED_SUBMISSION_DEFERRED"
+            if not issues and controlled_draft_created
+            else "SALES_INVOICE_NUMBER_RESERVED_IN_TALLY_FUTURE_DRAFT_CREATION_DEFERRED"
             if not issues and len(reservations) == 1 and len(confirmations) == 1
             else "SALES_INVOICE_NUMBER_RESERVED_TALLY_CONFIRMATION_PENDING"
             if not issues and len(reservations) == 1
@@ -190,7 +201,10 @@ def _assess(row, context):
             "classification_revision": classification.get("classification_revision"),
             "treatment_revision": classification.get("treatment_revision"),
         },
-        "tax_calculation_status": "DEFERRED_TO_STANDARD_ERPNEXT_SALES_INVOICE_TAX_RESOLUTION",
+        "tax_calculation_status": (
+            "CALCULATED_ON_DRAFT_NOT_POSTED" if controlled_draft_created
+            else "DEFERRED_TO_STANDARD_ERPNEXT_SALES_INVOICE_TAX_RESOLUTION"
+        ),
         "invoice_number_lead_system": "ERPNEXT",
         "invoice_number_coordination_mode": mode,
         "external_invoice_system": context.get("external_system_name") if mode == COORDINATION_TALLY else None,
@@ -198,6 +212,9 @@ def _assess(row, context):
         "invoice_number_reservation": reservations[0] if len(reservations) == 1 else None,
         "tally_reservation_confirmation": (
             confirmations[0] if len(confirmations) == 1 else None
+        ),
+        "sales_invoice_draft_creation_event": (
+            creation_events[0] if len(creation_events) == 1 else None
         ),
         "tally_confirmation_status": (
             "CONFIRMED" if not issues and len(confirmations) == 1 else

@@ -42,6 +42,9 @@ from subcontracting_extensions.sales_invoice_number_reservation import (
 from subcontracting_extensions.tally_invoice_number_confirmation import (
     confirm_tally_reservation as persist_tally_reservation_confirmation,
 )
+from subcontracting_extensions.retained_material_sales_invoice_draft_creation import (
+    create_sales_invoice_draft as persist_retained_material_sales_invoice_draft,
+)
 
 
 @frappe.whitelist()
@@ -252,6 +255,44 @@ def confirm_retained_material_invoice_number_reserved_in_tally(
         expected_last_disposition_event, expected_classification_revision,
         expected_treatment_revision, expected_last_decision_event,
         expected_policy_reconciliation_event,
+    )
+
+
+@frappe.whitelist()
+def create_retained_material_sales_invoice_draft(
+    reservation, confirmation, reason, draft_creation_confirmed,
+    expected_reservation_modified, expected_confirmation_modified,
+    expected_invoice_number, expected_naming_rule_snapshot,
+    expected_purchase_order_modified, expected_processor_lot_modified,
+    expected_supplier_modified, expected_customer_modified, expected_posting_date,
+    expected_recovery_quantity, expected_material_content_rate,
+    expected_net_material_amount, expected_supplier_warehouse_qty,
+    expected_supplier_warehouse_valuation_rate,
+    expected_supplier_warehouse_stock_value, expected_disposition_revision,
+    expected_last_disposition_event, expected_classification_revision,
+    expected_treatment_revision, expected_last_decision_event,
+    expected_policy_reconciliation_event, expected_taxes_and_charges,
+    expected_item_tax_template, expected_tax_rows, expected_total_taxes,
+    expected_grand_total,
+):
+    """Feature-gated J19B2J: create one draft; never submit or post it."""
+    if not cint(frappe.conf.get("v2_retained_material_sales_invoice_draft_creation")):
+        frappe.throw("Retained-material Sales Invoice draft creation is not enabled")
+    return persist_retained_material_sales_invoice_draft(
+        frappe, get_component_commercial_preview, reservation, confirmation, reason,
+        draft_creation_confirmed, expected_reservation_modified,
+        expected_confirmation_modified, expected_invoice_number,
+        _parse_json(expected_naming_rule_snapshot), expected_purchase_order_modified,
+        expected_processor_lot_modified, expected_supplier_modified,
+        expected_customer_modified, expected_posting_date, expected_recovery_quantity,
+        expected_material_content_rate, expected_net_material_amount,
+        expected_supplier_warehouse_qty, expected_supplier_warehouse_valuation_rate,
+        expected_supplier_warehouse_stock_value, expected_disposition_revision,
+        expected_last_disposition_event, expected_classification_revision,
+        expected_treatment_revision, expected_last_decision_event,
+        expected_policy_reconciliation_event, expected_taxes_and_charges,
+        expected_item_tax_template, _parse_json(expected_tax_rows),
+        expected_total_taxes, expected_grand_total,
     )
 
 

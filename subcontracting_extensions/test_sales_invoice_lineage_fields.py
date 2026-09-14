@@ -14,6 +14,8 @@ class TestSalesInvoiceLineageFields(unittest.TestCase):
         names = {row.get("name") for row in rows}
         expected = {
             "Sales Invoice-custom_processor_lot_settlement",
+            "Sales Invoice-custom_invoice_number_reservation",
+            "Sales Invoice-custom_tally_reservation_confirmation",
             "Sales Invoice Item-custom_processor_lot_scope_key",
             "Sales Invoice Item-custom_material_disposition",
             "Sales Invoice Item-custom_commercial_classification",

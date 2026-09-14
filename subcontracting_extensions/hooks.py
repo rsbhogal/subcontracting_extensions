@@ -59,6 +59,8 @@ fixtures = [
 					"Purchase Order-custom_recovery_customer",
 					"Supplier-custom_recovery_customer",
 					"Sales Invoice-custom_processor_lot_settlement",
+					"Sales Invoice-custom_invoice_number_reservation",
+					"Sales Invoice-custom_tally_reservation_confirmation",
 					"Sales Invoice Item-custom_processor_lot_scope_key",
 					"Sales Invoice Item-custom_material_disposition",
 					"Sales Invoice Item-custom_commercial_classification",
@@ -91,6 +93,14 @@ doc_events = {
 		"validate": (
 			"subcontracting_extensions.sales_invoice_number_reservation."
 			"protect_reserved_sales_invoice_number"
+		),
+		"before_submit": (
+			"subcontracting_extensions.retained_material_sales_invoice_draft_creation."
+			"prevent_uncontrolled_submission"
+		),
+		"on_trash": (
+			"subcontracting_extensions.retained_material_sales_invoice_draft_creation."
+			"prevent_controlled_draft_deletion"
 		),
 	},
 	"Subcontracting Order": {

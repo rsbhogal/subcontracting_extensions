@@ -210,6 +210,10 @@ def protect_reserved_sales_invoice_number(doc, method=None):
     if (doc.get("custom_processor_lot_settlement") != reservation.get("processor_lot")
             or len(matching) != 1):
         frappe.throw("This Sales Invoice number is reserved for a controlled Processor Lot scope")
+    from subcontracting_extensions.retained_material_sales_invoice_draft_creation import (
+        protect_controlled_draft_integrity,
+    )
+    protect_controlled_draft_integrity(doc)
 
 
 def _read_rules(api):
