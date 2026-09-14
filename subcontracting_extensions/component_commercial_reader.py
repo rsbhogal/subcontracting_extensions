@@ -16,6 +16,9 @@ from subcontracting_extensions.retained_material_sales_invoice_readiness import 
     COORDINATION_TALLY,
     attach_sales_invoice_draft_readiness,
 )
+from subcontracting_extensions.retained_material_sales_invoice_submission_readiness import (
+    attach_sales_invoice_submission_readiness,
+)
 from subcontracting_extensions.document_naming_rule_resolver import (
     forecast_from_naming_rule,
     naming_rule_snapshot,
@@ -134,6 +137,11 @@ def _read_component_commercial_preview(
         _sales_invoice_draft_readiness_context(api, lot, po, sco, result)
         if selected_sale else {},
     )
+    result = attach_sales_invoice_submission_readiness(
+        result,
+        _sales_invoice_submission_readiness_context(api, lot, po, sco, result)
+        if selected_sale else {},
+    )
     if classification_issues or result.get("material_disposition_issues"):
         result["commercial_review_permitted"] = False
         result["commercial_decision_code"] = (
@@ -160,6 +168,133 @@ def _read_component_commercial_preview(
         lot_closure_authorized=False,
     )
     return result
+
+
+def _sales_invoice_submission_readiness_context(api, lot, po, sco, report):
+    """Read live J19B2K facts without invoking submission or ledger previews."""
+    target_rows = [
+        row for row in (report.get("components") or [])
+        if (row.get("retained_material_sales_invoice_draft_readiness") or {}).get(
+            "sales_invoice_draft_creation_event"
+        )
+    ]
+    if len(target_rows) != 1:
+        return {}
+    row = target_rows[0]
+    scope_key = row.get("commercial_scope_key")
+    item_refs = api.get_all(
+        "Sales Invoice Item",
+        filters={"custom_processor_lot_scope_key": scope_key, "docstatus": ["!=", 2]},
+        fields=["parent"], limit_page_length=2,
+    )
+    invoice_names = sorted(set(ref.get("parent") for ref in item_refs if ref.get("parent")))
+    events = api.get_all(
+        "Processor Lot Sales Invoice Draft Creation Event",
+        filters={"scope_key": scope_key}, fields=["name"], limit_page_length=2,
+    )
+    if len(invoice_names) != 1 or len(events) != 1:
+        return {"invoice_count": len(invoice_names),
+                "draft_creation_event_count": len(events)}
+
+    invoice = api.get_doc("Sales Invoice", invoice_names[0])
+    invoice.check_permission("read")
+    event = api.get_doc("Processor Lot Sales Invoice Draft Creation Event",
+                        events[0].get("name"))
+    settings = api.get_single("Subcontracting Settlement Settings")
+    gl_entries = []
+    try:
+        for entry in invoice.get_gl_entries() or []:
+            gl_entries.append({
+                "account": entry.get("account"),
+                "party_type": entry.get("party_type"),
+                "party": entry.get("party"),
+                "debit": float(entry.get("debit") or 0),
+                "credit": float(entry.get("credit") or 0),
+                "cost_center": entry.get("cost_center"),
+            })
+    except (AttributeError, KeyError, TypeError, ValueError):
+        gl_entries = []
+
+    items = [item.as_dict() if hasattr(item, "as_dict") else dict(item)
+             for item in (invoice.get("items") or [])]
+    bin_rows = []
+    if len(items) == 1:
+        bin_rows = api.get_all(
+            "Bin", filters={"item_code": items[0].get("item_code"),
+                            "warehouse": items[0].get("warehouse")},
+            fields=["actual_qty", "valuation_rate", "stock_value"],
+            limit_page_length=2,
+        )
+    stock = {}
+    if len(bin_rows) == 1:
+        quantity = float(items[0].get("qty") or 0)
+        valuation_rate = float(bin_rows[0].get("valuation_rate") or 0)
+        stock = {
+            "warehouse": items[0].get("warehouse"),
+            "quantity_before": float(bin_rows[0].get("actual_qty") or 0),
+            "projected_reduction": quantity,
+            "quantity_after": float(bin_rows[0].get("actual_qty") or 0) - quantity,
+            "valuation_rate": valuation_rate,
+            "stock_value_before": float(bin_rows[0].get("stock_value") or 0),
+            "stock_value_reduction": quantity * valuation_rate,
+            "stock_value_after": float(bin_rows[0].get("stock_value") or 0)
+            - quantity * valuation_rate,
+        }
+
+    threshold = float(api.db.get_single_value("GST Settings", "e_waybill_threshold") or 0)
+    ewaybill_enabled = bool(api.db.get_single_value("GST Settings", "enable_e_waybill"))
+    einvoice_enabled = bool(api.db.get_single_value("GST Settings", "enable_e_invoice"))
+    document_value = float(invoice.get("rounded_total") or invoice.get("grand_total") or 0)
+    statutory = {
+        "ewaybill_applicable": bool(ewaybill_enabled and threshold
+                                    and document_value >= threshold),
+        "einvoice_applicable": bool(einvoice_enabled
+                                    and invoice.get("einvoice_status") != "Not Applicable"),
+        "ewaybill": invoice.get("ewaybill"),
+        "e_waybill_status": invoice.get("e_waybill_status"),
+        "irn": invoice.get("irn"),
+        "einvoice_status": invoice.get("einvoice_status"),
+        "vehicle_no": invoice.get("vehicle_no"),
+        "lr_no": invoice.get("lr_no"),
+        "lr_date": invoice.get("lr_date"),
+        "transporter": invoice.get("transporter"),
+        "mode_of_transport": invoice.get("mode_of_transport"),
+        "allow_blank_transport_details": bool(
+            invoice.get("custom_allow_blank_ewaybill_transport_details")
+        ),
+        "controlled_non_applicability_evidence": None,
+        "transport_details_required": bool(threshold and document_value > threshold),
+        "e_waybill_threshold": threshold,
+    }
+    linked_sle = api.db.count("Stock Ledger Entry", {
+        "voucher_type": "Sales Invoice", "voucher_no": invoice.name,
+    })
+    linked_gl = api.db.count("GL Entry", {
+        "voucher_type": "Sales Invoice", "voucher_no": invoice.name,
+    })
+    live_issues = []
+    if po.get("custom_recovery_customer") != invoice.get("customer"):
+        live_issues.append("RECOVERY_CUSTOMER_BINDING_CHANGED")
+    supplier = api.get_doc("Supplier", sco.get("supplier"))
+    customer = api.get_doc("Customer", invoice.get("customer"))
+    if (supplier.get("disabled") or customer.get("disabled")
+            or supplier.get("custom_recovery_customer") != customer.name):
+        live_issues.append("SUPPLIER_CUSTOMER_BINDING_NOT_READY")
+    settlement_started = bool(
+        lot.get("settlement_status") not in (None, "", "Draft")
+        or lot.get("generated_document") or lot.get("debit_note")
+    )
+    return {
+        "invoice_count": 1, "draft_creation_event_count": 1,
+        "sales_invoice": invoice.as_dict(), "sales_invoice_items": items,
+        "draft_creation_event": event.as_dict(),
+        "coordination_mode": settings.get("sales_invoice_number_coordination_mode"),
+        "statutory_evidence": statutory, "stock_projection": stock,
+        "projected_gl_entries": gl_entries,
+        "linked_stock_ledger_entries": linked_sle,
+        "linked_gl_entries": linked_gl, "settlement_started": settlement_started,
+        "live_state_issues": live_issues,
+    }
 
 
 def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
