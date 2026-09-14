@@ -341,7 +341,7 @@ class TestMaterialReconciliationUI(unittest.TestCase):
         self.check_single_item_routing(0)
 
     def test_whitelist_does_not_enable_guest_access(self):
-        self.assertEqual(self.frappe.whitelist.call_count, 10)
+        self.assertEqual(self.frappe.whitelist.call_count, 11)
 
 
 if __name__ == "__main__":

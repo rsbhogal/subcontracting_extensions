@@ -221,6 +221,13 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
                 "tally_confirmation_status", "reserved_by", "reserved_at"],
         limit_page_length=2,
     ) if scope_key else []
+    confirmations = api.get_all(
+        "Processor Lot Sales Invoice Number Confirmation",
+        filters={"scope_key": scope_key},
+        fields=["name", "reservation", "reserved_invoice_number", "confirmation_status",
+                "confirmed_by", "confirmed_at", "reason"],
+        limit_page_length=2,
+    ) if scope_key else []
 
     try:
         settings = api.get_single("Subcontracting Settlement Settings")
@@ -274,6 +281,7 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
             reconciliation[0].get("name") if len(reconciliation) == 1 else None
         ),
         "duplicate_documents": duplicates, "number_reservations": reservations,
+        "number_reservation_confirmations": confirmations,
         "stale_state_issues": stale,
         "coordination_mode": mode,
         "external_system_name": settings.get("external_invoice_system_name") or "Tally",

@@ -135,8 +135,17 @@ def _assess(row, context):
     mode = context.get("coordination_mode") or COORDINATION_DISABLED
     forecast = context.get("invoice_number_forecast")
     reservations = context.get("number_reservations") or []
+    confirmations = context.get("number_reservation_confirmations") or []
     if len(reservations) > 1:
         _issue(issues, "AMBIGUOUS_SALES_INVOICE_NUMBER_RESERVATION")
+    if len(confirmations) > 1:
+        _issue(issues, "AMBIGUOUS_TALLY_RESERVATION_CONFIRMATION")
+    if confirmations and (len(reservations) != 1
+            or confirmations[0].get("reservation") != reservations[0].get("name")
+            or confirmations[0].get("reserved_invoice_number")
+            != reservations[0].get("reserved_invoice_number")
+            or confirmations[0].get("confirmation_status") != "CONFIRMED"):
+        _issue(issues, "TALLY_RESERVATION_CONFIRMATION_MISMATCH")
     if mode == COORDINATION_TALLY and not forecast:
         _issue(issues, "TALLY_INVOICE_NUMBER_FORECAST_NOT_READY")
     elif mode not in (COORDINATION_DISABLED, COORDINATION_TALLY):
@@ -161,7 +170,9 @@ def _assess(row, context):
         **base,
         "applicable": True,
         "readiness_code": (
-            "SALES_INVOICE_NUMBER_RESERVED_TALLY_CONFIRMATION_PENDING"
+            "SALES_INVOICE_NUMBER_RESERVED_IN_TALLY_FUTURE_DRAFT_CREATION_DEFERRED"
+            if not issues and len(reservations) == 1 and len(confirmations) == 1
+            else "SALES_INVOICE_NUMBER_RESERVED_TALLY_CONFIRMATION_PENDING"
             if not issues and len(reservations) == 1
             else "SALES_INVOICE_DRAFT_FACTS_READY_FUTURE_CREATION_DEFERRED"
             if not issues else "SALES_INVOICE_DRAFT_FACTS_NOT_READY"
@@ -185,6 +196,17 @@ def _assess(row, context):
         "external_invoice_system": context.get("external_system_name") if mode == COORDINATION_TALLY else None,
         "invoice_number_forecast": forecast,
         "invoice_number_reservation": reservations[0] if len(reservations) == 1 else None,
+        "tally_reservation_confirmation": (
+            confirmations[0] if len(confirmations) == 1 else None
+        ),
+        "tally_confirmation_status": (
+            "CONFIRMED" if not issues and len(confirmations) == 1 else
+            "PENDING" if len(reservations) == 1 else None
+        ),
+        "tally_reservation_confirmation_available": bool(
+            not issues and mode == COORDINATION_TALLY
+            and len(reservations) == 1 and not confirmations
+        ),
         "invoice_number_reservation_available": bool(
             not issues and mode == COORDINATION_TALLY and not reservations
         ),

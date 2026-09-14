@@ -538,6 +538,9 @@ function j19_decision_label(code) {
         EXISTING_RETAINED_MATERIAL_SALES_INVOICE: "An existing Sales Invoice already carries this exact scope",
         TALLY_INVOICE_NUMBER_FORECAST_NOT_READY: "Tally invoice-number forecast is not ready",
         SALES_INVOICE_NUMBER_RESERVED_TALLY_CONFIRMATION_PENDING: "Invoice number reserved; Tally confirmation is pending",
+        SALES_INVOICE_NUMBER_RESERVED_IN_TALLY_FUTURE_DRAFT_CREATION_DEFERRED: "Invoice number confirmed reserved in Tally; Sales Invoice creation remains deferred",
+        AMBIGUOUS_TALLY_RESERVATION_CONFIRMATION: "Multiple Tally confirmation records exist for this scope",
+        TALLY_RESERVATION_CONFIRMATION_MISMATCH: "Tally confirmation does not match the current reservation",
         AMBIGUOUS_SALES_INVOICE_NUMBER_RESERVATION: "Multiple invoice-number reservations exist for this scope",
     };
     return __(labels[code] || code || "Commercial evidence requires review");
@@ -654,15 +657,21 @@ function j19_sales_invoice_draft_readiness_html(row) {
     if (!readiness.applicable) return "";
     const draft = readiness.draft_values || {};
     const forecast = readiness.invoice_number_forecast || {};
+    const reservation = readiness.invoice_number_reservation || {};
+    const confirmation = readiness.tally_reservation_confirmation || {};
     const issues = (readiness.blocking_issues || []).map(code =>
         `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
+    const coordinated_number = reservation.reserved_invoice_number || forecast.forecast_number || "—";
+    const coordination_text = confirmation.confirmation_status === "CONFIRMED"
+        ? __("Confirmed reserved in Tally. Sales Invoice creation remains deferred to a later controlled phase.")
+        : reservation.reserved_invoice_number
+        ? __("Reserved in ERPNext; explicit confirmation that the same number is reserved in Tally is still required.")
+        : __("Forecast only—not reserved. Reserve the confirmed number in Tally before future draft creation.");
     const warning = readiness.tally_reservation_confirmation_required_before_draft_creation
         ? `<div class="alert alert-danger" style="margin-top:10px;font-weight:700">
             ${j14_escape(__("CRITICAL — TALLY NUMBER COORDINATION REQUIRED"))}<br>
-            ${j14_escape(__("Expected next outward Sales Invoice number"))}: ${j14_escape(
-                forecast.forecast_number || "—")}<br>
-            <span style="font-weight:400">${j14_escape(__(
-                "Forecast only—not reserved. Reserve the confirmed number in Tally before future draft creation."))}</span>
+            ${j14_escape(__("Controlled outward Sales Invoice number"))}: ${j14_escape(coordinated_number)}<br>
+            <span style="font-weight:400">${j14_escape(coordination_text)}</span>
            </div>` : "";
     return `<div style="margin:10px 0">
         <div style="font-size:14px;font-weight:600;margin-bottom:6px">${j14_escape(__("Sales Invoice draft readiness"))}</div>

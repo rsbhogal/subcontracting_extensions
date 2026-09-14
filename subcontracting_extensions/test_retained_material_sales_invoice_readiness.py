@@ -120,6 +120,42 @@ class TestDraftReadiness(unittest.TestCase):
         )["components"][0]["retained_material_sales_invoice_draft_readiness"]
         self.assertFalse(readiness["applicable"])
 
+    def test_matching_confirmation_projects_effective_confirmed_status(self):
+        context = self.context()
+        context["number_reservations"] = [{
+            "name": "PLSINR-1", "reserved_invoice_number": "U-I/26-27/0017",
+        }]
+        context["number_reservation_confirmations"] = [{
+            "name": "PLSINC-1", "reservation": "PLSINR-1",
+            "reserved_invoice_number": "U-I/26-27/0017",
+            "confirmation_status": "CONFIRMED",
+        }]
+        readiness = attach_sales_invoice_draft_readiness(
+            {"components": [self.row()]}, context
+        )["components"][0]["retained_material_sales_invoice_draft_readiness"]
+        self.assertEqual(
+            readiness["readiness_code"],
+            "SALES_INVOICE_NUMBER_RESERVED_IN_TALLY_FUTURE_DRAFT_CREATION_DEFERRED",
+        )
+        self.assertEqual(readiness["tally_confirmation_status"], "CONFIRMED")
+        self.assertFalse(readiness["tally_reservation_confirmation_available"])
+
+    def test_confirmation_mismatch_fails_closed(self):
+        context = self.context()
+        context["number_reservations"] = [{
+            "name": "PLSINR-1", "reserved_invoice_number": "U-I/26-27/0017",
+        }]
+        context["number_reservation_confirmations"] = [{
+            "name": "PLSINC-1", "reservation": "OTHER",
+            "reserved_invoice_number": "U-I/26-27/0017",
+            "confirmation_status": "CONFIRMED",
+        }]
+        readiness = attach_sales_invoice_draft_readiness(
+            {"components": [self.row()]}, context
+        )["components"][0]["retained_material_sales_invoice_draft_readiness"]
+        self.assertIn("TALLY_RESERVATION_CONFIRMATION_MISMATCH",
+                      readiness["blocking_issues"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -39,6 +39,9 @@ from subcontracting_extensions.retained_material_treatment_selection import (
 from subcontracting_extensions.sales_invoice_number_reservation import (
     reserve_sales_invoice_number as persist_sales_invoice_number_reservation,
 )
+from subcontracting_extensions.tally_invoice_number_confirmation import (
+    confirm_tally_reservation as persist_tally_reservation_confirmation,
+)
 
 
 @frappe.whitelist()
@@ -212,6 +215,39 @@ def reserve_retained_material_sales_invoice_number(
         expected_customer_modified, expected_recovery_quantity,
         expected_material_content_rate, expected_net_material_amount,
         expected_supplier_warehouse_qty, expected_supplier_warehouse_valuation_rate,
+        expected_supplier_warehouse_stock_value, expected_disposition_revision,
+        expected_last_disposition_event, expected_classification_revision,
+        expected_treatment_revision, expected_last_decision_event,
+        expected_policy_reconciliation_event,
+    )
+
+
+@frappe.whitelist()
+def confirm_retained_material_invoice_number_reserved_in_tally(
+    reservation, reason, confirmation_attested, expected_reservation_modified,
+    expected_invoice_number, expected_naming_rule_snapshot,
+    expected_purchase_order_modified, expected_processor_lot_modified,
+    expected_supplier_modified, expected_customer_modified,
+    expected_recovery_quantity, expected_material_content_rate,
+    expected_net_material_amount, expected_supplier_warehouse_qty,
+    expected_supplier_warehouse_valuation_rate,
+    expected_supplier_warehouse_stock_value, expected_disposition_revision,
+    expected_last_disposition_event, expected_classification_revision,
+    expected_treatment_revision, expected_last_decision_event,
+    expected_policy_reconciliation_event,
+):
+    """Feature-gated J19B2I attestation; never creates or authorizes an invoice."""
+    if not cint(frappe.conf.get("v2_retained_material_tally_reservation_confirmation")):
+        frappe.throw("Retained-material Tally reservation confirmation is not enabled")
+    return persist_tally_reservation_confirmation(
+        frappe, get_component_commercial_preview, reservation, reason,
+        confirmation_attested, expected_reservation_modified,
+        expected_invoice_number, _parse_json(expected_naming_rule_snapshot),
+        expected_purchase_order_modified, expected_processor_lot_modified,
+        expected_supplier_modified, expected_customer_modified,
+        expected_recovery_quantity, expected_material_content_rate,
+        expected_net_material_amount, expected_supplier_warehouse_qty,
+        expected_supplier_warehouse_valuation_rate,
         expected_supplier_warehouse_stock_value, expected_disposition_revision,
         expected_last_disposition_event, expected_classification_revision,
         expected_treatment_revision, expected_last_decision_event,
