@@ -547,6 +547,8 @@ function j19_decision_label(code) {
         AMBIGUOUS_SALES_INVOICE_NUMBER_RESERVATION: "Multiple invoice-number reservations exist for this scope",
         SALES_INVOICE_DRAFT_NOT_READY_FOR_CONTROLLED_SUBMISSION: "Draft Sales Invoice is not ready for controlled submission",
         SALES_INVOICE_DRAFT_READY_FOR_FUTURE_CONTROLLED_SUBMISSION: "Draft evidence is ready for a future controlled submission phase",
+        SALES_INVOICE_SUBMITTED_LOT_CLOSURE_DEFERRED: "Sales Invoice submitted and posted; Processor Lot remains open",
+        POSTED_WITH_SUBMITTED_SALES_INVOICE: "Posted with submitted Sales Invoice",
         TALLY_STATUTORY_REFERENCE_NOT_RECORDED: "Tally statutory reference is not recorded on the Draft Sales Invoice",
         TALLY_VEHICLE_NUMBER_NOT_RECORDED: "Tally vehicle number is not recorded",
         TALLY_TRANSPORT_RECEIPT_DATE_NOT_RECORDED: "Tally transport receipt date is not recorded",
@@ -674,10 +676,13 @@ function j19_sales_invoice_draft_readiness_html(row) {
     const reservation = readiness.invoice_number_reservation || {};
     const confirmation = readiness.tally_reservation_confirmation || {};
     const creation = readiness.sales_invoice_draft_creation_event || {};
+    const submission = readiness.sales_invoice_submission_event || {};
     const issues = (readiness.blocking_issues || []).map(code =>
         `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
     const coordinated_number = reservation.reserved_invoice_number || forecast.forecast_number || "—";
-    const coordination_text = creation.sales_invoice
+    const coordination_text = submission.sales_invoice
+        ? __("Controlled Sales Invoice {0} is submitted. Tally number coordination is complete; Processor Lot closure remains deferred.", [submission.sales_invoice])
+        : creation.sales_invoice
         ? __("Controlled Draft Sales Invoice {0} exists. Tally number reservation is confirmed; submission remains deferred to a later controlled phase.", [creation.sales_invoice])
         : confirmation.confirmation_status === "CONFIRMED"
         ? __("Confirmed reserved in Tally. Sales Invoice creation remains deferred to a later controlled phase.")
@@ -685,8 +690,8 @@ function j19_sales_invoice_draft_readiness_html(row) {
         ? __("Reserved in ERPNext; explicit confirmation that the same number is reserved in Tally is still required.")
         : __("Forecast only—not reserved. Reserve the confirmed number in Tally before future draft creation.");
     const warning = readiness.tally_reservation_confirmation_required_before_draft_creation
-        ? `<div class="alert alert-danger" style="margin-top:10px;font-weight:700">
-            ${j14_escape(__("CRITICAL — TALLY NUMBER COORDINATION REQUIRED"))}<br>
+        ? `<div class="alert ${submission.name ? "alert-success" : "alert-danger"}" style="margin-top:10px;font-weight:700">
+            ${j14_escape(__(submission.name ? "TALLY NUMBER COORDINATION COMPLETED" : "CRITICAL — TALLY NUMBER COORDINATION REQUIRED"))}<br>
             ${j14_escape(__("Controlled outward Sales Invoice number"))}: ${j14_escape(coordinated_number)}<br>
             <span style="font-weight:400">${j14_escape(coordination_text)}</span>
            </div>` : "";
@@ -703,7 +708,9 @@ function j19_sales_invoice_draft_readiness_html(row) {
         ]])}
         ${warning}
         ${issues ? `<div>${j14_badge(__("Readiness blockers"), "amber")}<ul>${issues}</ul></div>` : ""}
-        <p class="text-muted">${j14_escape(__(creation.sales_invoice
+        <p class="text-muted">${j14_escape(__(submission.name
+            ? "Controlled Sales Invoice is submitted and posted. Processor Lot closure remains unauthorised."
+            : creation.sales_invoice
             ? "Controlled Draft Sales Invoice exists. Submission, stock, accounting, tax posting, and lot closure remain unauthorised."
             : "Read-only forecast: no invoice number is reserved and no Sales Invoice, stock, accounting, tax, or lot-closure action is authorised."))}</p>
     </div>`;
@@ -716,12 +723,21 @@ function j19_sales_invoice_submission_readiness_html(row) {
     const stock = readiness.stock_projection || {};
     const issues = (readiness.blocking_issues || []).map(code =>
         `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
-    const gl = (readiness.projected_gl_entries || []).map(entry => [
+    const submission = readiness.submission_event || {};
+    const gl_source = submission.name
+        ? (readiness.posted_gl_entries || [])
+        : (readiness.projected_gl_entries || []);
+    const gl = gl_source.map(entry => [
         j14_escape(entry.account || "—"),
         entry.debit ? j14_qty(entry.debit) : "—",
         entry.credit ? j14_qty(entry.credit) : "—",
     ]);
     const confirmation = readiness.statutory_evidence_confirmation || {};
+    const sle = (readiness.posted_stock_ledger_entries || []).map(entry => [
+        j14_escape(entry.item_code || "—"), j14_escape(entry.warehouse || "—"),
+        j14_qty(entry.actual_qty), j14_qty(entry.qty_after_transaction),
+        j14_qty(entry.stock_value_difference),
+    ]);
     const confirmation_html = confirmation.name
         ? `<div style="margin-top:8px">${j14_badge(__("No physical movement confirmed"), "green")}
             ${j14_link("Processor Lot Sales Invoice Statutory Evidence Confirmation", confirmation.name)}
@@ -732,14 +748,21 @@ function j19_sales_invoice_submission_readiness_html(row) {
             data-j19-statutory-confirm data-j19-scope="${j14_escape(row.commercial_scope_key)}">
             ${j14_escape(__("Confirm No Physical Movement"))}</button>`
         : "";
+    const submission_html = readiness.controlled_submission_available
+        ? `<button type="button" class="btn btn-xs btn-danger" style="margin-top:8px;font-weight:700"
+            data-j19-submit-invoice data-j19-scope="${j14_escape(row.commercial_scope_key)}">
+            ${j14_escape(__("Submit Controlled Sales Invoice"))}</button>`
+        : "";
     return `<div style="margin:10px 0">
         <div style="font-size:14px;font-weight:600;margin-bottom:6px">${j14_escape(__("Sales Invoice submission readiness"))}</div>
         <div>${j14_badge(j19_decision_label(readiness.readiness_code),
             readiness.blocking_issues?.length ? "amber" : "green")}</div>
-        <div class="alert alert-warning" style="margin-top:10px;font-weight:600">
-            ${j14_escape(__("CURRENT OPERATING CONTROL — TALLY IS THE STATUTORY LEAD"))}<br>
+        <div class="alert ${submission.name ? "alert-success" : "alert-warning"}" style="margin-top:10px;font-weight:600">
+            ${j14_escape(__(submission.name ? "STATUTORY COORDINATION COMPLETED IN TALLY" : "CURRENT OPERATING CONTROL — TALLY IS THE STATUTORY LEAD"))}<br>
             <span style="font-weight:400">${j14_escape(__(
-                "Record the Tally statutory evidence on the ERPNext draft before any future controlled submission."))}</span>
+                submission.name
+                    ? "ERPNext statutory generation was suppressed for this controlled submission."
+                    : "Record the Tally statutory evidence on the ERPNext draft before any future controlled submission."))}</span>
         </div>
         ${j14_table(["Invoice", "Statutory Lead", "e-Waybill", "Vehicle", "Transport Receipt Date"], [[
             j14_escape(readiness.sales_invoice || "—"),
@@ -753,15 +776,25 @@ function j19_sales_invoice_submission_readiness_html(row) {
             j14_qty(stock.projected_reduction), j14_qty(stock.quantity_after),
             j14_qty(stock.stock_value_reduction),
         ]])}
-        ${gl.length ? j14_table(["Projected Account", "Debit", "Credit"], gl) : ""}
+        ${sle.length ? j14_table(["Item", "Warehouse", "Stock Change", "Balance After", "Value Change"], sle) : ""}
+        ${gl.length ? j14_table([submission.name ? "Posted Account" : "Projected Account", "Debit", "Credit"], gl) : ""}
         ${issues ? `<div>${j14_badge(__("Submission-readiness blockers"), "amber")}<ul>${issues}</ul></div>` : ""}
         ${confirmation_html}
-        <p class="text-muted">${j14_escape(__(
-            "Read-only evidence: submission, statutory generation, stock, accounting, tax posting, and lot closure remain unauthorised."))}</p>
+        ${submission_html}
+        <p class="text-muted">${j14_escape(__(submission.name
+            ? "Submission evidence is recorded. ERPNext statutory generation and Processor Lot closure remain unauthorised."
+            : "Read-only evidence: submission, statutory generation, stock, accounting, tax posting, and lot closure remain unauthorised."))}</p>
+        ${submission.name ? `<div>${j14_badge(__("Submitted and posted"), "green")}
+            ${j14_link("Processor Lot Sales Invoice Submission Event", submission.name)}
+            <div class="text-muted">${j14_escape(submission.submitted_by || "—")} · ${j14_escape(submission.submitted_at || "—")}</div>
+            <div style="margin-top:4px">${j14_escape(submission.reason || "")}</div></div>` : ""}
     </div>`;
 }
 
 function build_j19_commercial_summary(report) {
+    const submitted_row = (report.components || []).find(row =>
+        row.retained_material_sales_invoice_submission_readiness?.submission_event?.name);
+    if (submitted_row) return j19_submitted_sales_invoice_summary_html(submitted_row);
     const scopes = [
         ...(report.finished_items || []).map((row, index) => ({row, index, scope_type: "Finished Item"})),
         ...(report.components || []).map((row, index) => ({row, index, scope_type: "Raw Material"})),
@@ -821,6 +854,32 @@ function build_j19_commercial_summary(report) {
     </div>`;
 }
 
+function j19_submitted_sales_invoice_summary_html(row) {
+    const readiness = row.retained_material_sales_invoice_submission_readiness || {};
+    const event = readiness.submission_event || {};
+    const draft = row.retained_material_sales_invoice_draft_readiness?.draft_values || {};
+    const stock = readiness.stock_projection || {};
+    return `<div data-j19-commercial-preview style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
+        <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("Retained Material Recovery"))}</div>
+        <div>${j14_badge(__("Sales Invoice submitted"), "green")}</div>
+        <div style="margin-top:10px">${j14_table(
+            ["Invoice", "Customer", "Material", "Quantity", "Taxable Value", "GST", "Invoice Total"], [[
+                j14_link("Sales Invoice", readiness.sales_invoice),
+                j14_escape(draft.customer || "—"), j14_escape(draft.item_code || row.component_item || "—"),
+                `${j14_qty(draft.qty)} ${j14_escape(draft.uom || row.stock_uom || "")}`,
+                j14_qty(event.net_total), j14_qty(event.total_taxes_and_charges), j14_qty(event.grand_total),
+            ]])}</div>
+        <div class="alert alert-success" style="margin-top:10px">
+            <strong>${j14_escape(__("Recovery completed in ERPNext"))}</strong><br>
+            ${j14_escape(__("Supplier warehouse stock"))}: ${j14_qty(stock.quantity_before)} → ${j14_qty(stock.quantity_after)} ${j14_escape(draft.uom || row.stock_uom || "")}<br>
+            ${j14_escape(__("Tally statutory coordination"))}: ${j14_escape(__("Completed"))}<br>
+            ${j14_escape(__("Physical movement"))}: ${j14_escape(__("None"))}<br>
+            ${j14_escape(__("Processor Lot"))}: ${j14_escape(__("Remains open"))}
+        </div>
+        <p class="text-muted">${j14_escape(__("Open the detailed audit evidence only when transaction lineage or posting details are required."))}</p>
+    </div>`;
+}
+
 function build_j19_commercial_panel(report, detailed = false) {
     if (!detailed && !report.error) return build_j19_commercial_summary(report);
     if (report.error) return `<div style="border-top:1px solid #d8e2ea;margin-top:12px;padding-top:12px">
@@ -847,9 +906,14 @@ function build_j19_commercial_panel(report, detailed = false) {
                 ${j14_qty(row.suggested_recovery_quantity)} ${j14_escape(row.stock_uom)}
                 · <strong>${j14_escape(__("Suggested material amount"))}:</strong>
                 ${j14_qty(row.suggested_recovery_amount)}</div>`;
-        const readiness_code = row.retained_material_treatment_readiness?.applicable
+        const submitted_code = row.retained_material_sales_invoice_submission_readiness
+            ?.submission_event?.name
+            ? row.retained_material_sales_invoice_submission_readiness.readiness_code
+            : null;
+        const readiness_code = submitted_code
+            || (row.retained_material_treatment_readiness?.applicable
             ? row.retained_material_treatment_readiness.readiness_code
-            : row.commercial_execution_readiness_code;
+            : row.commercial_execution_readiness_code);
         return `<div>${suggested}</div>
             ${recovery}
             ${evidence ? `<div class="text-muted" style="margin-top:5px">${evidence}</div>` : ""}
@@ -899,6 +963,8 @@ function build_j19_commercial_panel(report, detailed = false) {
         row.commercial_decision_code === "RAW_MATERIAL_RETAINED_BY_PROCESSOR");
     const retained_readiness_present = (report.components || []).some(row =>
         row.retained_material_treatment_readiness?.applicable);
+    const submitted = (report.components || []).some(row =>
+        row.retained_material_sales_invoice_submission_readiness?.submission_event?.name);
     const material_rate_note = retained_fact_present
         ? __("J19B2D validates the exact retained-material recovery quantity, historical material-content cost, recovery-customer readiness, and future Update Stock consequence. It excludes ABC processing and consumable costs and authorises neither treatment, a document, nor lot closure.")
         : __("J19B2A suggests the material-content rate from exact historical dispatch cost. It excludes ABC processing and consumable costs, does not define a recovery quantity, and authorises neither a document nor lot closure.");
@@ -911,8 +977,8 @@ function build_j19_commercial_panel(report, detailed = false) {
         ${policy_readiness}
         ${j14_table(["Finished Item", "UOM", "Company Accepted", "Supplier Invoiced", "Variance", "Commercial Evidence", "Persisted Classification", "Invoice Evidence", "Decision"], finished_rows)}
         ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Commercial Evidence", "Disposition / Classification", "Dispatch Cost Evidence", "Decision"], component_rows)}
-        ${(report.components || []).map(j19_retained_treatment_readiness_html).join("")}
-        ${(report.components || []).map(j19_sales_invoice_draft_readiness_html).join("")}
+        ${submitted ? "" : (report.components || []).map(j19_retained_treatment_readiness_html).join("")}
+        ${submitted ? "" : (report.components || []).map(j19_sales_invoice_draft_readiness_html).join("")}
         ${(report.components || []).map(j19_sales_invoice_submission_readiness_html).join("")}
         <p class="text-muted">${j14_escape(material_rate_note)}</p>
         ${policy && !retained_readiness_present ? `<div>${j14_badge(__("Settlement policy requires review"), "amber")}<ul>${policy}</ul></div>` : ""}
@@ -945,6 +1011,55 @@ function j19_bind_decision_actions(frm, wrapper) {
         );
         if (row) j19_confirm_no_physical_movement(frm, row, this);
     });
+    const submit_invoice = wrapper?.find?.("[data-j19-submit-invoice]");
+    submit_invoice?.off?.("click.j19b2m").on?.("click.j19b2m", function () {
+        const scope = this.dataset.j19Scope;
+        const row = (frm.__j19_commercial_report?.components || []).find(
+            item => item.commercial_scope_key === scope
+        );
+        if (row) j19_submit_controlled_sales_invoice(frm, row, this);
+    });
+}
+
+function j19_submit_controlled_sales_invoice(frm, row, button) {
+    const readiness = row.retained_material_sales_invoice_submission_readiness || {};
+    const confirmation = readiness.statutory_evidence_confirmation || {};
+    const stock = readiness.stock_projection || {};
+    frappe.prompt([
+        {fieldtype: "HTML", fieldname: "warning", options:
+            `<div class="alert alert-danger"><strong>${j14_escape(__("CRITICAL — THIS SUBMITS AND POSTS THE SALES INVOICE"))}</strong><br>
+            ${j14_escape(__("ERPNext will reduce the supplier warehouse stock and post receivable, sales, GST, cost-of-goods-sold, and stock-value entries. Tally remains the statutory lead; ERPNext statutory generation stays suppressed. The Processor Lot will not close."))}</div>`},
+        {fieldtype: "Check", fieldname: "submission_confirmed",
+            label: __("I confirm this exact controlled Sales Invoice must now be submitted"), reqd: 1},
+        {fieldtype: "Small Text", fieldname: "reason", label: __("Submission Reason"), reqd: 1},
+    ], async values => {
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+            await frappe.call({
+                method: "subcontracting_extensions.material_reconciliation_ui.submit_retained_material_sales_invoice",
+                args: {
+                    sales_invoice: readiness.sales_invoice,
+                    statutory_confirmation: confirmation.name,
+                    reason: values.reason,
+                    submission_confirmed: values.submission_confirmed,
+                    expected_invoice_modified: readiness.sales_invoice_modified,
+                    expected_statutory_confirmation_modified: confirmation.modified,
+                    expected_scope_key: row.commercial_scope_key,
+                    expected_disposition_revision: row.persisted_material_disposition?.disposition_revision,
+                    expected_classification_revision: row.persisted_classification?.classification_revision,
+                    expected_treatment_revision: row.persisted_classification?.treatment_revision,
+                    expected_supplier_warehouse_qty: stock.quantity_before,
+                    expected_supplier_warehouse_valuation_rate: stock.valuation_rate,
+                    expected_supplier_warehouse_stock_value: stock.stock_value_before,
+                }, freeze: true, freeze_message: __("Submitting controlled Sales Invoice"),
+            });
+            frappe.show_alert({message: __("Controlled Sales Invoice submitted; Processor Lot remains open"), indicator: "green"});
+            await frm.reload_doc();
+        } finally {
+            button.disabled = false;
+        }
+    }, __("Controlled Sales Invoice Submission"), __("Submit and Post"));
 }
 
 function j19_confirm_no_physical_movement(frm, row, button) {
@@ -1167,10 +1282,29 @@ function render_j16_operational_guidance(frm) {
     if (!field?.$wrapper || !material || frm.is_new()) return;
     const detailed = j16_detailed_preference();
     const commercial = frm.__j19_commercial_report;
-    const state = j16_guidance_state(frm, material, frm.__j16_completion_report, commercial);
+    const submitted_row = (commercial?.components || []).find(row =>
+        row.retained_material_sales_invoice_submission_readiness?.submission_event?.name);
+    const submission_readiness = submitted_row
+        ?.retained_material_sales_invoice_submission_readiness || {};
+    const submitted_invoice = submission_readiness.sales_invoice;
+    const state = submitted_row ? {
+        tone: "green",
+        title: __("Retained material recovery completed"),
+        detail: __("The Sales Invoice is submitted and the supplier warehouse stock has been reduced. Review Processor Lot closure separately."),
+        link: submitted_invoice ? j14_link("Sales Invoice", submitted_invoice) : "",
+    } : j16_guidance_state(frm, material, frm.__j16_completion_report, commercial);
     const commercial_components = new Map((commercial?.components || []).map(row => [row.sco_supplied_item, row]));
     const rows = (material.components || []).map(row => {
         const decision = commercial_components.get(row.sco_supplied_item);
+        const row_submitted = decision?.retained_material_sales_invoice_submission_readiness
+            ?.submission_event?.name;
+        if (row_submitted) return [j14_escape(row.component_item), j14_escape(row.stock_uom),
+            j14_qty(row.physical_remaining_qty), j14_qty(row.applied_credit_qty), j14_qty(row.unaccounted_remaining_qty),
+            j14_badge(__("Commercially settled"), "green"),
+            `<div>${j14_badge(__("No component return required"), "green")}</div>
+                <div class="text-muted" style="margin-top:5px">${j14_escape(__("The retained quantity was recovered commercially; no material moves now."))}</div>`,
+            `<div>${j14_badge(__("Sales Invoice submitted"), "green")}</div>
+                <div style="margin-top:5px">${j14_link("Sales Invoice", submitted_invoice)}</div>`];
         return [j14_escape(row.component_item), j14_escape(row.stock_uom),
         j14_qty(row.physical_remaining_qty), j14_qty(row.applied_credit_qty), j14_qty(row.unaccounted_remaining_qty),
         j14_badge(__(row.material_next_action_label || "Review component evidence"),
@@ -1180,11 +1314,17 @@ function render_j16_operational_guidance(frm) {
             : `<div>${j14_badge(__("Commercial treatment not determined"), "neutral")}</div>
                 <div class="text-muted" style="margin-top:5px">${j14_escape(__("No commercial document is authorised."))}</div>`];
     });
+    const position_table = submitted_row && !detailed ? "" : j14_table(
+        submitted_row
+            ? ["Component", "UOM", "Historical Physical Balance", "Applied Credit", "Historical Unaccounted", "Material Outcome", "Component Return", "Commercial Treatment"]
+            : ["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Material Action", "Component Return", "Commercial Treatment"],
+        rows
+    );
     field.$wrapper.html(`<div style="border:1px solid #8baecb;border-radius:8px;padding:14px;background:#f7fbfe">
-        <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__("What to do next"))}</div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:8px">${j14_escape(__(submitted_row ? "Current position" : "What to do next"))}</div>
         <div>${j14_badge(state.title, state.tone)} ${state.link}</div>
         <div style="margin-top:8px">${j14_escape(state.detail)}</div>
-        ${j14_table(["Component", "UOM", "Physical Balance", "Applied Credit", "Unaccounted", "Material Action", "Component Return", "Commercial Treatment"], rows)}
+        ${position_table}
         ${commercial?.enabled ? build_j19_commercial_panel(commercial, detailed) : ""}
         <label style="display:inline-flex;align-items:center;gap:7px;margin:4px 0 0;cursor:pointer;font-weight:500">
             <input type="checkbox" data-j16-detailed ${detailed ? "checked" : ""}>

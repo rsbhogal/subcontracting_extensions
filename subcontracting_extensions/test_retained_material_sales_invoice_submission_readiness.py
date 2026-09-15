@@ -158,6 +158,23 @@ class TestSubmissionReadiness(unittest.TestCase):
                          "SALES_INVOICE_DRAFT_READY_FOR_FUTURE_CONTROLLED_SUBMISSION")
         self.assertFalse(readiness["submission_authorized"])
 
+    def test_controlled_submission_button_requires_flag_and_confirmation(self):
+        context = self.context()
+        context["statutory_evidence"].update(ewaybill=None, vehicle_no=None)
+        context["statutory_evidence_confirmation_count"] = 1
+        context["statutory_evidence_confirmation"] = {
+            "name": "PLSISEC-1", "sales_invoice": "U-I/26-27/0017",
+            "scope_key": "SCOPE", "draft_creation_event": "PLSIDC-1",
+            "evidence_outcome": "NOT_APPLICABLE_NO_PHYSICAL_MOVEMENT",
+            "confirmation_attested": 1,
+            "statutory_evidence_snapshot": context["statutory_evidence"],
+        }
+        _, readiness = self.assess(context)
+        self.assertFalse(readiness["controlled_submission_available"])
+        context["sales_invoice_submission_enabled"] = True
+        _, readiness = self.assess(context)
+        self.assertTrue(readiness["controlled_submission_available"])
+
     def test_changed_statutory_fields_make_confirmation_stale(self):
         context = self.context()
         snapshot = dict(context["statutory_evidence"])
@@ -172,6 +189,28 @@ class TestSubmissionReadiness(unittest.TestCase):
         _, readiness = self.assess(context)
         self.assertIn("TALLY_STATUTORY_EVIDENCE_CONFIRMATION_STALE",
                       readiness["blocking_issues"])
+
+    def test_submitted_state_uses_audited_stock_before_and_after(self):
+        context = self.context()
+        context["sales_invoice"]["docstatus"] = 1
+        context["submission_event_count"] = 1
+        context["submission_event"] = {
+            "name": "PLSISE-1", "sales_invoice": "U-I/26-27/0017",
+            "processor_lot": "LOT", "scope_key": "SCOPE",
+            "supplier_warehouse": "Processor - C",
+            "warehouse_qty_before": 20000, "warehouse_qty_after": 0,
+            "warehouse_stock_value_before": 1167000,
+            "warehouse_stock_value_after": 0,
+        }
+        context["stock_projection"].update(
+            quantity_before=0, quantity_after=-20000, valuation_rate=58.35,
+        )
+        _, readiness = self.assess(context)
+        self.assertEqual(readiness["readiness_code"],
+                         "SALES_INVOICE_SUBMITTED_LOT_CLOSURE_DEFERRED")
+        self.assertEqual(readiness["stock_projection"]["quantity_before"], 20000)
+        self.assertEqual(readiness["stock_projection"]["quantity_after"], 0)
+        self.assertEqual(readiness["stock_projection"]["projected_reduction"], 20000)
 
 
 if __name__ == "__main__":

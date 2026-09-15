@@ -64,6 +64,63 @@ def _assess(row, context):
     classification = row.get("persisted_classification") or {}
     lineage = draft_readiness.get("lineage") or {}
 
+    submission_count = context.get("submission_event_count") or 0
+    submission_event = context.get("submission_event") or {}
+    if submission_count:
+        post_issues = []
+        if submission_count != 1:
+            _issue(post_issues, "AMBIGUOUS_CONTROLLED_SALES_INVOICE_SUBMISSION_EVENT")
+        if invoice.get("docstatus") != 1:
+            _issue(post_issues, "CONTROLLED_SUBMISSION_EVENT_INVOICE_NOT_SUBMITTED")
+        if (submission_event.get("sales_invoice") != invoice.get("name")
+                or submission_event.get("scope_key") != lineage.get("scope_key")
+                or submission_event.get("processor_lot") != lineage.get("processor_lot")):
+            _issue(post_issues, "CONTROLLED_SUBMISSION_EVENT_LINEAGE_MISMATCH")
+        return {
+            **base,
+            "applicable": True,
+            "readiness_code": (
+                "SALES_INVOICE_SUBMITTED_LOT_CLOSURE_DEFERRED"
+                if not post_issues else "CONTROLLED_SALES_INVOICE_SUBMISSION_EVIDENCE_INVALID"
+            ),
+            "blocking_issues": post_issues,
+            "sales_invoice": invoice.get("name"),
+            "sales_invoice_modified": invoice.get("modified"),
+            "submission_event": submission_event or None,
+            "statutory_lead_system": "Tally",
+            "controlled_submission_available": False,
+            "stock_projection": {
+                "warehouse": submission_event.get("supplier_warehouse"),
+                "quantity_before": submission_event.get("warehouse_qty_before"),
+                "projected_reduction": _difference(
+                    submission_event.get("warehouse_qty_before"),
+                    submission_event.get("warehouse_qty_after"),
+                ),
+                "quantity_after": submission_event.get("warehouse_qty_after"),
+                "valuation_rate": (context.get("stock_projection") or {}).get(
+                    "valuation_rate"
+                ),
+                "stock_value_before": submission_event.get(
+                    "warehouse_stock_value_before"
+                ),
+                "stock_value_reduction": _difference(
+                    submission_event.get("warehouse_stock_value_before"),
+                    submission_event.get("warehouse_stock_value_after"),
+                ),
+                "stock_value_after": submission_event.get(
+                    "warehouse_stock_value_after"
+                ),
+            },
+            "projected_gl_entries": [],
+            "posted_stock_ledger_entries": _json_list(
+                submission_event.get("stock_ledger_snapshot")
+            ),
+            "posted_gl_entries": _json_list(
+                submission_event.get("gl_entry_snapshot")
+            ),
+            "tax_calculation_status": "POSTED_WITH_SUBMITTED_SALES_INVOICE",
+        }
+
     if context.get("invoice_count") != 1:
         _issue(issues, "CONTROLLED_SALES_INVOICE_DRAFT_MISSING_OR_AMBIGUOUS")
     if context.get("draft_creation_event_count") != 1:
@@ -191,6 +248,11 @@ def _assess(row, context):
                 "TALLY_VEHICLE_NUMBER_NOT_RECORDED",
             }
         ),
+        "controlled_submission_available": bool(
+            context.get("sales_invoice_submission_enabled")
+            and not issues and confirmation_count == 1
+            and controlled_no_movement and invoice.get("docstatus") == 0
+        ),
         "stock_projection": stock,
         "projected_gl_entries": gl_rows,
         "tax_calculation_status": "CALCULATED_ON_DRAFT_NOT_POSTED",
@@ -202,6 +264,21 @@ def _same_number(actual, expected):
         return Decimal(str(actual)) == Decimal(str(expected))
     except (InvalidOperation, TypeError, ValueError):
         return False
+
+
+def _difference(before, after):
+    try:
+        return float(Decimal(str(before)) - Decimal(str(after)))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _json_list(value):
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
 
 
 def _integer(value):

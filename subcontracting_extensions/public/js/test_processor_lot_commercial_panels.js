@@ -249,6 +249,60 @@ function commercial() {
     assert(!html.includes("No commercial decision currently requires attention."));
     assert(!html.includes("Select Treatment"));
 
+    const submitted = retained;
+    submitted.legacy_evidence = [];
+    submitted.components[1].retained_material_sales_invoice_draft_readiness.sales_invoice_submission_event = {
+        name: "PLSISE-1", sales_invoice: "U-I/26-27/0017",
+    };
+    submitted.components[1].retained_material_sales_invoice_submission_readiness = {
+        applicable: true, readiness_code: "SALES_INVOICE_SUBMITTED_LOT_CLOSURE_DEFERRED",
+        blocking_issues: [], sales_invoice: "U-I/26-27/0017",
+        stock_projection: {warehouse: "Processor <unsafe>", quantity_before: 20000,
+            projected_reduction: 20000, quantity_after: 0, stock_value_reduction: 1167000},
+        submission_event: {name: "PLSISE-1", sales_invoice: "U-I/26-27/0017",
+            submitted_by: "Administrator", submitted_at: "2026-09-15 12:13:46",
+            reason: "Controlled recovery", net_total: 1167000,
+            total_taxes_and_charges: 210060, grand_total: 1377060},
+        posted_stock_ledger_entries: [{item_code: "Wire Rod <unsafe>",
+            warehouse: "Processor <unsafe>", actual_qty: -20000,
+            qty_after_transaction: 0, stock_value_difference: -1167000}],
+        posted_gl_entries: [{account: "Debtors <unsafe>", debit: 1377060, credit: 0}],
+    };
+    html = context.build_j19_commercial_panel(submitted, false);
+    assert(html.includes("Retained Material Recovery"));
+    assert(html.includes("Recovery completed in ERPNext"));
+    assert(html.includes("Tally statutory coordination") && html.includes("Remains open"));
+    assert(!html.includes("Retained-material treatment readiness"));
+    assert(!html.includes("Sales Invoice submission readiness"));
+    assert(!html.includes("PLSISE-1"));
+    html = context.build_j19_commercial_panel(submitted, true);
+    assert(html.includes("Posted Account") && html.includes("Stock Change"));
+    assert(html.includes("Debtors &lt;unsafe&gt;") && !html.includes("Debtors <unsafe>"));
+    assert(html.includes("Wire Rod &lt;unsafe&gt;") && !html.includes("Wire Rod <unsafe>"));
+    assert(html.includes("PLSISE-1") && html.includes("Controlled recovery"));
+    assert(!html.includes("Retained-material treatment readiness"));
+    assert(!html.includes("Sales Invoice draft readiness"));
+    assert(!html.includes("Legacy commercial evidence"));
+    const submittedFrm = form();
+    submittedFrm.__j16_material_report = material();
+    submittedFrm.__j19_commercial_report = submitted;
+    context.render_j16_operational_guidance(submittedFrm);
+    let submittedGuidance = submittedFrm.get_field("operational_guidance_html").$wrapper.markup;
+    assert(submittedGuidance.includes("Current position"));
+    assert(submittedGuidance.includes("Retained material recovery completed"));
+    assert(submittedGuidance.includes("Review Processor Lot closure separately"));
+    assert(!submittedGuidance.includes("Account for remaining material"));
+    assert(!submittedGuidance.includes("Component return blocked"));
+    assert(!submittedGuidance.includes("Historical Physical Balance"));
+    context.localStorage.getItem = () => "1";
+    context.render_j16_operational_guidance(submittedFrm);
+    submittedGuidance = submittedFrm.get_field("operational_guidance_html").$wrapper.markup;
+    assert(submittedGuidance.includes("Historical Physical Balance"));
+    assert(submittedGuidance.includes("Commercially settled"));
+    assert(submittedGuidance.includes("No component return required"));
+    assert(submittedGuidance.includes("Sales Invoice submitted"));
+    context.localStorage.getItem = () => null;
+
     report.commercial_decision_entry_enabled = true;
     report.finished_items[0].decision_capability = {
         variance_direction: "Shortage", classification_entry_available: true,

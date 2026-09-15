@@ -211,6 +211,17 @@ def _sales_invoice_submission_readiness_context(api, lot, po, sco, report):
             "Processor Lot Sales Invoice Statutory Evidence Confirmation",
             statutory_confirmations[0].get("name"),
         ).as_dict()
+    submission_events = api.get_all(
+        "Processor Lot Sales Invoice Submission Event",
+        filters={"sales_invoice": invoice.name}, fields=["name"],
+        limit_page_length=2,
+    )
+    submission_event = None
+    if len(submission_events) == 1:
+        submission_event = api.get_doc(
+            "Processor Lot Sales Invoice Submission Event",
+            submission_events[0].get("name"),
+        ).as_dict()
     settings = api.get_single("Subcontracting Settlement Settings")
     gl_entries = []
     try:
@@ -300,12 +311,17 @@ def _sales_invoice_submission_readiness_context(api, lot, po, sco, report):
         "statutory_evidence_confirmation_enabled": str(api.conf.get(
             "v2_retained_material_tally_statutory_evidence_confirmation") or "0"
         ).lower() in ("1", "true"),
+        "sales_invoice_submission_enabled": str(api.conf.get(
+            "v2_retained_material_sales_invoice_submission") or "0"
+        ).lower() in ("1", "true"),
         "sales_invoice": invoice.as_dict(), "sales_invoice_items": items,
         "draft_creation_event": event.as_dict(),
         "coordination_mode": settings.get("sales_invoice_number_coordination_mode"),
         "statutory_evidence": statutory, "stock_projection": stock,
         "statutory_evidence_confirmation_count": len(statutory_confirmations),
         "statutory_evidence_confirmation": statutory_confirmation,
+        "submission_event_count": len(submission_events),
+        "submission_event": submission_event,
         "projected_gl_entries": gl_entries,
         "linked_stock_ledger_entries": linked_sle,
         "linked_gl_entries": linked_gl, "settlement_started": settlement_started,
@@ -387,6 +403,12 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
                 "total_taxes_and_charges", "grand_total"],
         limit_page_length=2,
     ) if scope_key else []
+    submission_events = api.get_all(
+        "Processor Lot Sales Invoice Submission Event",
+        filters={"scope_key": scope_key},
+        fields=["name", "sales_invoice", "submitted_by", "submitted_at"],
+        limit_page_length=2,
+    ) if scope_key else []
 
     try:
         settings = api.get_single("Subcontracting Settlement Settings")
@@ -442,6 +464,7 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
         "duplicate_documents": duplicates, "number_reservations": reservations,
         "number_reservation_confirmations": confirmations,
         "sales_invoice_draft_creation_events": draft_creation_events,
+        "sales_invoice_submission_events": submission_events,
         "stale_state_issues": stale,
         "coordination_mode": mode,
         "external_system_name": settings.get("external_invoice_system_name") or "Tally",
@@ -895,7 +918,8 @@ def _read_legacy_evidence(api, lot, sco):
         if not doc.get("sco_supplied_item"):
             evidence.append({"doctype": "Processor Material Account Entry", "name": doc.name,
                              "docstatus": doc.get("docstatus"), "reason": "Missing exact SCO supplied row"})
-    if lot.get("settlement_status") not in (None, "", "Draft", "Reopened", "Cancelled"):
+    if lot.get("settlement_status") not in (
+            None, "", "Draft", "Reopened", "Cancelled", "Sales Invoice Created"):
         evidence.append({"doctype": "Processor Lot", "name": lot.name,
                          "docstatus": lot.get("docstatus"), "reason": "Legacy settlement state"})
     return evidence

@@ -150,7 +150,8 @@ def _read_material_position(api, processor_lot):
             debit = read("Purchase Invoice", related.get("debit_note"))
             if debit.docstatus != 2:
                 add_settlement_evidence("Purchase Invoice", debit.name, "Debit Note")
-        if related.get("settlement_status") not in (None, "", "Draft", "Reopened", "Cancelled"):
+        if related.get("settlement_status") not in (
+                None, "", "Draft", "Reopened", "Cancelled", "Sales Invoice Created"):
             add_settlement_evidence("Processor Lot", name, "Settlement state")
 
     plr_names = child_parents("Processor Lot Receipt Allocation", "Processor Lot Receipt", "lot_allocations",

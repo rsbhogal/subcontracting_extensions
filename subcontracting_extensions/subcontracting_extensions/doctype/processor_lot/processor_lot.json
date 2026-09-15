@@ -158,7 +158,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Settlement Status",
-   "options": "Draft\nDebit Note Created\nReversal In Progress\nReopened\nReopened - Debit Note Created\nCompleted\nCancelled",
+   "options": "Draft\nDebit Note Created\nSales Invoice Created\nReversal In Progress\nReopened\nReopened - Debit Note Created\nCompleted\nCancelled",
    "read_only": 1
   },
   {

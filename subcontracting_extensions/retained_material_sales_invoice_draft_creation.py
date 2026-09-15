@@ -254,6 +254,8 @@ def create_sales_invoice_draft(
 
 def prevent_uncontrolled_submission(doc, method=None):
     """Keep every controlled retained-material invoice draft-only through J19B2J."""
+    if doc.flags.get("controlled_retained_material_submission"):
+        return
     if (doc.get("custom_invoice_number_reservation")
             or doc.get("custom_tally_reservation_confirmation")):
         import frappe
@@ -293,7 +295,11 @@ def protect_controlled_draft_integrity(doc):
     if len(events) != 1:
         frappe.throw("Controlled Sales Invoice draft-creation evidence is ambiguous")
     event = events[0]
-    if (doc.docstatus != 0
+    controlled_submission = bool(
+        doc.flags.get("controlled_retained_material_submission")
+    )
+    if ((doc.docstatus != 0
+            and not (doc.docstatus == 1 and controlled_submission))
             or reservation_name != event.get("reservation")
             or doc.get("custom_tally_reservation_confirmation") != event.get("tally_confirmation")
             or doc.get("custom_processor_lot_settlement") != event.get("processor_lot")):

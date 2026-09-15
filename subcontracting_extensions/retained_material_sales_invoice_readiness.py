@@ -129,10 +129,16 @@ def _assess(row, context):
         _issue(issues, "COMMERCIAL_SCOPE_CHANGED")
     duplicate_documents = context.get("duplicate_documents") or []
     creation_events = context.get("sales_invoice_draft_creation_events") or []
+    submission_events = context.get("sales_invoice_submission_events") or []
     controlled_draft_created = bool(
         len(duplicate_documents) == 1 and len(creation_events) == 1
         and creation_events[0].get("sales_invoice") == duplicate_documents[0].get("parent")
         and creation_events[0].get("draft_only")
+    )
+    controlled_submitted = bool(
+        controlled_draft_created and len(submission_events) == 1
+        and submission_events[0].get("sales_invoice")
+        == duplicate_documents[0].get("parent")
     )
     if duplicate_documents and not controlled_draft_created:
         _issue(issues, "EXISTING_RETAINED_MATERIAL_SALES_INVOICE")
@@ -179,7 +185,9 @@ def _assess(row, context):
         **base,
         "applicable": True,
         "readiness_code": (
-            "SALES_INVOICE_DRAFT_CREATED_SUBMISSION_DEFERRED"
+            "SALES_INVOICE_SUBMITTED_LOT_CLOSURE_DEFERRED"
+            if not issues and controlled_submitted
+            else "SALES_INVOICE_DRAFT_CREATED_SUBMISSION_DEFERRED"
             if not issues and controlled_draft_created
             else "SALES_INVOICE_NUMBER_RESERVED_IN_TALLY_FUTURE_DRAFT_CREATION_DEFERRED"
             if not issues and len(reservations) == 1 and len(confirmations) == 1
@@ -202,7 +210,8 @@ def _assess(row, context):
             "treatment_revision": classification.get("treatment_revision"),
         },
         "tax_calculation_status": (
-            "CALCULATED_ON_DRAFT_NOT_POSTED" if controlled_draft_created
+            "POSTED_WITH_SUBMITTED_SALES_INVOICE" if controlled_submitted
+            else "CALCULATED_ON_DRAFT_NOT_POSTED" if controlled_draft_created
             else "DEFERRED_TO_STANDARD_ERPNEXT_SALES_INVOICE_TAX_RESOLUTION"
         ),
         "invoice_number_lead_system": "ERPNEXT",
@@ -215,6 +224,9 @@ def _assess(row, context):
         ),
         "sales_invoice_draft_creation_event": (
             creation_events[0] if len(creation_events) == 1 else None
+        ),
+        "sales_invoice_submission_event": (
+            submission_events[0] if len(submission_events) == 1 else None
         ),
         "tally_confirmation_status": (
             "CONFIRMED" if not issues and len(confirmations) == 1 else

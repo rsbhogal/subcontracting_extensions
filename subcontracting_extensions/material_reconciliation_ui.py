@@ -48,6 +48,9 @@ from subcontracting_extensions.retained_material_sales_invoice_draft_creation im
 from subcontracting_extensions.tally_statutory_evidence_confirmation import (
     confirm_no_physical_movement as persist_no_physical_movement_confirmation,
 )
+from subcontracting_extensions.retained_material_sales_invoice_submission import (
+    submit_sales_invoice as persist_retained_material_sales_invoice_submission,
+)
 
 
 @frappe.whitelist()
@@ -318,6 +321,29 @@ def confirm_retained_material_no_physical_movement(
         expected_tally_confirmation, expected_disposition_revision,
         expected_classification_revision, expected_treatment_revision,
         _parse_json(expected_statutory_evidence),
+    )
+
+
+@frappe.whitelist()
+def submit_retained_material_sales_invoice(
+    sales_invoice, statutory_confirmation, reason, submission_confirmed,
+    expected_invoice_modified, expected_statutory_confirmation_modified,
+    expected_scope_key, expected_disposition_revision,
+    expected_classification_revision, expected_treatment_revision,
+    expected_supplier_warehouse_qty, expected_supplier_warehouse_valuation_rate,
+    expected_supplier_warehouse_stock_value,
+):
+    """Feature-gated J19B2M atomic submission; never closes the lot."""
+    if not cint(frappe.conf.get("v2_retained_material_sales_invoice_submission")):
+        frappe.throw("Retained-material Sales Invoice submission is not enabled")
+    return persist_retained_material_sales_invoice_submission(
+        frappe, get_component_commercial_preview, sales_invoice,
+        statutory_confirmation, reason, submission_confirmed,
+        expected_invoice_modified, expected_statutory_confirmation_modified,
+        expected_scope_key, expected_disposition_revision,
+        expected_classification_revision, expected_treatment_revision,
+        expected_supplier_warehouse_qty, expected_supplier_warehouse_valuation_rate,
+        expected_supplier_warehouse_stock_value,
     )
 
 
