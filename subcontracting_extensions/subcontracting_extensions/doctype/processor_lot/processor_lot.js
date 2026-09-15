@@ -554,6 +554,8 @@ function j19_decision_label(code) {
         BLANK_TRANSPORT_OVERRIDE_HAS_NO_CONTROLLED_JUSTIFICATION: "Blank transport-details override has no controlled justification",
         PROJECTED_STOCK_CONSEQUENCE_NOT_READY: "Projected stock consequence is not ready",
         PROJECTED_ACCOUNTING_CONSEQUENCE_NOT_READY: "Projected accounting consequence is not ready",
+        TALLY_STATUTORY_EVIDENCE_CONFIRMATION_STALE: "Tally statutory-evidence confirmation is stale",
+        AMBIGUOUS_TALLY_STATUTORY_EVIDENCE_CONFIRMATION: "Multiple Tally statutory-evidence confirmations exist",
     };
     return __(labels[code] || code || "Commercial evidence requires review");
 }
@@ -719,6 +721,17 @@ function j19_sales_invoice_submission_readiness_html(row) {
         entry.debit ? j14_qty(entry.debit) : "—",
         entry.credit ? j14_qty(entry.credit) : "—",
     ]);
+    const confirmation = readiness.statutory_evidence_confirmation || {};
+    const confirmation_html = confirmation.name
+        ? `<div style="margin-top:8px">${j14_badge(__("No physical movement confirmed"), "green")}
+            ${j14_link("Processor Lot Sales Invoice Statutory Evidence Confirmation", confirmation.name)}
+            <div class="text-muted">${j14_escape(confirmation.confirmed_by || "—")} ·
+            ${j14_escape(confirmation.confirmed_at || "—")}</div></div>`
+        : readiness.statutory_evidence_confirmation_available
+        ? `<button type="button" class="btn btn-xs btn-warning" style="margin-top:8px;font-weight:600"
+            data-j19-statutory-confirm data-j19-scope="${j14_escape(row.commercial_scope_key)}">
+            ${j14_escape(__("Confirm No Physical Movement"))}</button>`
+        : "";
     return `<div style="margin:10px 0">
         <div style="font-size:14px;font-weight:600;margin-bottom:6px">${j14_escape(__("Sales Invoice submission readiness"))}</div>
         <div>${j14_badge(j19_decision_label(readiness.readiness_code),
@@ -742,6 +755,7 @@ function j19_sales_invoice_submission_readiness_html(row) {
         ]])}
         ${gl.length ? j14_table(["Projected Account", "Debit", "Credit"], gl) : ""}
         ${issues ? `<div>${j14_badge(__("Submission-readiness blockers"), "amber")}<ul>${issues}</ul></div>` : ""}
+        ${confirmation_html}
         <p class="text-muted">${j14_escape(__(
             "Read-only evidence: submission, statutory generation, stock, accounting, tax posting, and lot closure remain unauthorised."))}</p>
     </div>`;
@@ -923,6 +937,52 @@ function j19_bind_decision_actions(frm, wrapper) {
         const row = (frm.__j19_commercial_report?.components || [])[Number(this.dataset.j19Index)];
         if (row) j19_open_material_disposition_dialog(frm, row, this);
     });
+    const statutory = wrapper?.find?.("[data-j19-statutory-confirm]");
+    statutory?.off?.("click.j19b2l").on?.("click.j19b2l", function () {
+        const scope = this.dataset.j19Scope;
+        const row = (frm.__j19_commercial_report?.components || []).find(
+            item => item.commercial_scope_key === scope
+        );
+        if (row) j19_confirm_no_physical_movement(frm, row, this);
+    });
+}
+
+function j19_confirm_no_physical_movement(frm, row, button) {
+    const readiness = row.retained_material_sales_invoice_submission_readiness || {};
+    const draft = row.retained_material_sales_invoice_draft_readiness || {};
+    frappe.prompt([
+        {fieldtype: "HTML", fieldname: "warning", options:
+            `<div class="alert alert-warning"><strong>${j14_escape(__("Tally remains the statutory lead."))}</strong><br>
+            ${j14_escape(__("Confirm only when this recovery sale removes material already lying at the processor and causes no physical movement."))}</div>`},
+        {fieldtype: "Check", fieldname: "confirmation_attested",
+            label: __("I attest that this invoice causes no physical movement"), reqd: 1},
+        {fieldtype: "Small Text", fieldname: "reason", label: __("Reason"), reqd: 1},
+    ], async values => {
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+            await frappe.call({
+                method: "subcontracting_extensions.material_reconciliation_ui.confirm_retained_material_no_physical_movement",
+                args: {
+                    sales_invoice: readiness.sales_invoice,
+                    reason: values.reason,
+                    confirmation_attested: values.confirmation_attested,
+                    expected_invoice_modified: readiness.sales_invoice_modified,
+                    expected_scope_key: row.commercial_scope_key,
+                    expected_draft_creation_event: readiness.draft_creation_event,
+                    expected_reservation: draft.invoice_number_reservation?.name,
+                    expected_tally_confirmation: draft.tally_reservation_confirmation?.name,
+                    expected_disposition_revision: row.persisted_material_disposition?.disposition_revision,
+                    expected_classification_revision: row.persisted_classification?.classification_revision,
+                    expected_treatment_revision: row.persisted_classification?.treatment_revision,
+                    expected_statutory_evidence: readiness.statutory_evidence,
+                }, freeze: true, freeze_message: __("Confirming statutory evidence"),
+            });
+            await render_j14_material_panel(frm);
+        } finally {
+            button.disabled = false;
+        }
+    }, __("Controlled No-Physical-Movement Confirmation"), __("Confirm Evidence"));
 }
 
 function j19_open_material_disposition_dialog(frm, row, button) {

@@ -45,6 +45,9 @@ from subcontracting_extensions.tally_invoice_number_confirmation import (
 from subcontracting_extensions.retained_material_sales_invoice_draft_creation import (
     create_sales_invoice_draft as persist_retained_material_sales_invoice_draft,
 )
+from subcontracting_extensions.tally_statutory_evidence_confirmation import (
+    confirm_no_physical_movement as persist_no_physical_movement_confirmation,
+)
 
 
 @frappe.whitelist()
@@ -293,6 +296,28 @@ def create_retained_material_sales_invoice_draft(
         expected_policy_reconciliation_event, expected_taxes_and_charges,
         expected_item_tax_template, _parse_json(expected_tax_rows),
         expected_total_taxes, expected_grand_total,
+    )
+
+
+@frappe.whitelist()
+def confirm_retained_material_no_physical_movement(
+    sales_invoice, reason, confirmation_attested, expected_invoice_modified,
+    expected_scope_key, expected_draft_creation_event, expected_reservation,
+    expected_tally_confirmation, expected_disposition_revision,
+    expected_classification_revision, expected_treatment_revision,
+    expected_statutory_evidence,
+):
+    """Feature-gated J19B2L determination; never submits or posts the invoice."""
+    if not cint(frappe.conf.get(
+            "v2_retained_material_tally_statutory_evidence_confirmation")):
+        frappe.throw("Retained-material Tally statutory evidence confirmation is not enabled")
+    return persist_no_physical_movement_confirmation(
+        frappe, get_component_commercial_preview, sales_invoice, reason,
+        confirmation_attested, expected_invoice_modified, expected_scope_key,
+        expected_draft_creation_event, expected_reservation,
+        expected_tally_confirmation, expected_disposition_revision,
+        expected_classification_revision, expected_treatment_revision,
+        _parse_json(expected_statutory_evidence),
     )
 
 

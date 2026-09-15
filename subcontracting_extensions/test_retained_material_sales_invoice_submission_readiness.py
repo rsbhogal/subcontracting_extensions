@@ -141,6 +141,38 @@ class TestSubmissionReadiness(unittest.TestCase):
         )["components"][0]["retained_material_sales_invoice_submission_readiness"]
         self.assertFalse(result["applicable"])
 
+    def test_immutable_no_movement_confirmation_clears_tally_blockers_only(self):
+        context = self.context()
+        context["statutory_evidence"].update(ewaybill=None, vehicle_no=None)
+        context["statutory_evidence_confirmation_count"] = 1
+        context["statutory_evidence_confirmation"] = {
+            "name": "PLSISEC-1", "sales_invoice": "U-I/26-27/0017",
+            "scope_key": "SCOPE", "draft_creation_event": "PLSIDC-1",
+            "evidence_outcome": "NOT_APPLICABLE_NO_PHYSICAL_MOVEMENT",
+            "confirmation_attested": 1,
+            "statutory_evidence_snapshot": context["statutory_evidence"],
+        }
+        _, readiness = self.assess(context)
+        self.assertEqual(readiness["blocking_issues"], [])
+        self.assertEqual(readiness["readiness_code"],
+                         "SALES_INVOICE_DRAFT_READY_FOR_FUTURE_CONTROLLED_SUBMISSION")
+        self.assertFalse(readiness["submission_authorized"])
+
+    def test_changed_statutory_fields_make_confirmation_stale(self):
+        context = self.context()
+        snapshot = dict(context["statutory_evidence"])
+        context["statutory_evidence_confirmation_count"] = 1
+        context["statutory_evidence_confirmation"] = {
+            "name": "PLSISEC-1", "sales_invoice": "U-I/26-27/0017",
+            "scope_key": "SCOPE", "draft_creation_event": "PLSIDC-1",
+            "evidence_outcome": "NOT_APPLICABLE_NO_PHYSICAL_MOVEMENT",
+            "confirmation_attested": 1, "statutory_evidence_snapshot": snapshot,
+        }
+        context["statutory_evidence"]["vehicle_no"] = "CHANGED"
+        _, readiness = self.assess(context)
+        self.assertIn("TALLY_STATUTORY_EVIDENCE_CONFIRMATION_STALE",
+                      readiness["blocking_issues"])
+
 
 if __name__ == "__main__":
     unittest.main()

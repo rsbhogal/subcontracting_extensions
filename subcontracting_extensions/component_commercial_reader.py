@@ -200,6 +200,17 @@ def _sales_invoice_submission_readiness_context(api, lot, po, sco, report):
     invoice.check_permission("read")
     event = api.get_doc("Processor Lot Sales Invoice Draft Creation Event",
                         events[0].get("name"))
+    statutory_confirmations = api.get_all(
+        "Processor Lot Sales Invoice Statutory Evidence Confirmation",
+        filters={"sales_invoice": invoice.name}, fields=["name"],
+        limit_page_length=2,
+    )
+    statutory_confirmation = None
+    if len(statutory_confirmations) == 1:
+        statutory_confirmation = api.get_doc(
+            "Processor Lot Sales Invoice Statutory Evidence Confirmation",
+            statutory_confirmations[0].get("name"),
+        ).as_dict()
     settings = api.get_single("Subcontracting Settlement Settings")
     gl_entries = []
     try:
@@ -286,10 +297,15 @@ def _sales_invoice_submission_readiness_context(api, lot, po, sco, report):
     )
     return {
         "invoice_count": 1, "draft_creation_event_count": 1,
+        "statutory_evidence_confirmation_enabled": str(api.conf.get(
+            "v2_retained_material_tally_statutory_evidence_confirmation") or "0"
+        ).lower() in ("1", "true"),
         "sales_invoice": invoice.as_dict(), "sales_invoice_items": items,
         "draft_creation_event": event.as_dict(),
         "coordination_mode": settings.get("sales_invoice_number_coordination_mode"),
         "statutory_evidence": statutory, "stock_projection": stock,
+        "statutory_evidence_confirmation_count": len(statutory_confirmations),
+        "statutory_evidence_confirmation": statutory_confirmation,
         "projected_gl_entries": gl_entries,
         "linked_stock_ledger_entries": linked_sle,
         "linked_gl_entries": linked_gl, "settlement_started": settlement_started,

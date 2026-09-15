@@ -6,6 +6,7 @@ documents, posts tax, changes stock, or closes a Processor Lot.
 
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
+import json
 
 
 CONTRACT_VERSION = "J19B2K"
@@ -123,10 +124,33 @@ def _assess(row, context):
 
     tally_lead = context.get("coordination_mode") == TALLY_MODE
     statutory = context.get("statutory_evidence") or {}
+    confirmation_count = context.get("statutory_evidence_confirmation_count") or 0
+    confirmation = context.get("statutory_evidence_confirmation") or {}
+    controlled_no_movement = False
+    if confirmation_count > 1:
+        _issue(issues, "AMBIGUOUS_TALLY_STATUTORY_EVIDENCE_CONFIRMATION")
+    elif confirmation_count == 1:
+        snapshot = confirmation.get("statutory_evidence_snapshot")
+        try:
+            snapshot = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+        except (TypeError, ValueError):
+            snapshot = None
+        controlled_no_movement = bool(
+            confirmation.get("sales_invoice") == invoice.get("name")
+            and confirmation.get("scope_key") == lineage.get("scope_key")
+            and confirmation.get("draft_creation_event") == event.get("name")
+            and confirmation.get("evidence_outcome")
+            == "NOT_APPLICABLE_NO_PHYSICAL_MOVEMENT"
+            and confirmation.get("confirmation_attested")
+            and _canonical(snapshot) == _canonical(statutory)
+        )
+        if not controlled_no_movement:
+            _issue(issues, "TALLY_STATUTORY_EVIDENCE_CONFIRMATION_STALE")
     if tally_lead:
-        if not statutory.get("ewaybill") and statutory.get("ewaybill_applicable"):
+        if (not controlled_no_movement and not statutory.get("ewaybill")
+                and statutory.get("ewaybill_applicable")):
             _issue(issues, "TALLY_STATUTORY_REFERENCE_NOT_RECORDED")
-        if statutory.get("transport_details_required"):
+        if statutory.get("transport_details_required") and not controlled_no_movement:
             if not statutory.get("vehicle_no"):
                 _issue(issues, "TALLY_VEHICLE_NUMBER_NOT_RECORDED")
             if not statutory.get("lr_date"):
@@ -153,10 +177,20 @@ def _assess(row, context):
         ),
         "blocking_issues": issues,
         "sales_invoice": invoice.get("name"),
+        "sales_invoice_modified": invoice.get("modified"),
         "draft_creation_event": event.get("name"),
         "operational_lead_system": "Tally" if tally_lead else "ERPNext",
         "statutory_lead_system": "Tally" if tally_lead else "ERPNext",
         "statutory_evidence": statutory,
+        "statutory_evidence_confirmation": confirmation or None,
+        "statutory_evidence_confirmation_available": bool(
+            context.get("statutory_evidence_confirmation_enabled")
+            and tally_lead and not confirmation_count
+            and set(issues) == {
+                "TALLY_STATUTORY_REFERENCE_NOT_RECORDED",
+                "TALLY_VEHICLE_NUMBER_NOT_RECORDED",
+            }
+        ),
         "stock_projection": stock,
         "projected_gl_entries": gl_rows,
         "tax_calculation_status": "CALCULATED_ON_DRAFT_NOT_POSTED",
@@ -180,3 +214,7 @@ def _integer(value):
 def _issue(issues, code):
     if code not in issues:
         issues.append(code)
+
+
+def _canonical(value):
+    return json.loads(json.dumps(value, sort_keys=True, default=str))
