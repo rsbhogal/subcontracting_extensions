@@ -19,6 +19,9 @@ from subcontracting_extensions.retained_material_sales_invoice_readiness import 
 from subcontracting_extensions.retained_material_sales_invoice_submission_readiness import (
     attach_sales_invoice_submission_readiness,
 )
+from subcontracting_extensions.processor_lot_closure_readiness import (
+    attach_processor_lot_closure_readiness,
+)
 from subcontracting_extensions.document_naming_rule_resolver import (
     forecast_from_naming_rule,
     naming_rule_snapshot,
@@ -167,7 +170,123 @@ def _read_component_commercial_preview(
         commercial_document_authorized=False,
         lot_closure_authorized=False,
     )
-    return result
+    return attach_processor_lot_closure_readiness(
+        result,
+        _processor_lot_closure_readiness_context(api, lot, result),
+    )
+
+
+def _processor_lot_closure_readiness_context(api, lot, report):
+    """Read live posting facts needed by J19B2N without enabling closure."""
+    posting = {}
+    collection_states = []
+    for row in report.get("components") or []:
+        scope_key = row.get("commercial_scope_key")
+        readiness = (
+            row.get("retained_material_sales_invoice_submission_readiness") or {}
+        )
+        invoice_name = readiness.get("sales_invoice")
+        if not scope_key or not invoice_name or not readiness.get("submission_event"):
+            continue
+        try:
+            invoice = api.get_doc("Sales Invoice", invoice_name)
+            invoice.check_permission("read")
+        except (KeyError, TypeError):
+            continue
+
+        items = list(invoice.get("items") or [])
+        bin_rows = []
+        if len(items) == 1:
+            bin_rows = api.get_all(
+                "Bin",
+                filters={
+                    "item_code": items[0].get("item_code"),
+                    "warehouse": items[0].get("warehouse"),
+                },
+                fields=["actual_qty", "stock_value"],
+                limit_page_length=2,
+            )
+        stock = bin_rows[0] if len(bin_rows) == 1 else {}
+        sle_count = len(readiness.get("posted_stock_ledger_entries") or [])
+        gl_count = len(readiness.get("posted_gl_entries") or [])
+        database = getattr(api, "db", None)
+        live_sle = list(readiness.get("posted_stock_ledger_entries") or [])
+        live_gl = list(readiness.get("posted_gl_entries") or [])
+        if database and hasattr(database, "count"):
+            sle_count = database.count("Stock Ledger Entry", {
+                "voucher_type": "Sales Invoice", "voucher_no": invoice.name,
+                "is_cancelled": 0,
+            })
+            gl_count = database.count("GL Entry", {
+                "voucher_type": "Sales Invoice", "voucher_no": invoice.name,
+                "is_cancelled": 0,
+            })
+            live_sle = api.get_all(
+                "Stock Ledger Entry",
+                filters={"voucher_type": "Sales Invoice", "voucher_no": invoice.name,
+                         "is_cancelled": 0},
+                fields=["name", "item_code", "warehouse", "actual_qty",
+                        "qty_after_transaction", "valuation_rate",
+                        "stock_value_difference"],
+                limit_page_length=0,
+            )
+            live_gl = api.get_all(
+                "GL Entry",
+                filters={"voucher_type": "Sales Invoice", "voucher_no": invoice.name,
+                         "is_cancelled": 0},
+                fields=["name", "account", "party_type", "party", "debit", "credit",
+                        "cost_center"],
+                limit_page_length=0,
+            )
+        event = readiness.get("submission_event") or {}
+        lineage_matches = bool(
+            len(items) == 1
+            and items[0].get("custom_processor_lot_scope_key") == scope_key
+            and event.get("sales_invoice") == invoice.name
+            and event.get("processor_lot") == lot.name
+            and event.get("scope_key") == scope_key
+        )
+        commercial_values_match = all(
+            float(invoice.get(fieldname) or 0) == float(event.get(fieldname) or 0)
+            for fieldname in ("net_total", "total_taxes_and_charges", "grand_total")
+        )
+        posting[scope_key] = {
+            "sales_invoice": invoice.name,
+            "sales_invoice_docstatus": invoice.get("docstatus"),
+            "lineage_matches": lineage_matches,
+            "commercial_values_match": commercial_values_match,
+            "stock_ledger_entry_count": sle_count,
+            "gl_entry_count": gl_count,
+            "live_stock_ledger_entries": live_sle,
+            "live_gl_entries": live_gl,
+            "supplier_warehouse_qty": stock.get("actual_qty"),
+            "supplier_warehouse_stock_value": stock.get("stock_value"),
+        }
+        outstanding = float(invoice.get("outstanding_amount") or 0)
+        collection_states.append("OUTSTANDING" if outstanding > 0 else "SETTLED")
+
+    has_submit = False
+    permission_reader = getattr(lot, "has_permission", None)
+    if callable(permission_reader):
+        has_submit = bool(permission_reader("submit"))
+    conf = getattr(api, "conf", {}) or {}
+    enabled = str(conf.get("v2_processor_lot_closure_readiness") or "0").lower()
+    return {
+        "processor_lot": {
+            "name": lot.name,
+            "docstatus": lot.get("docstatus"),
+            "settlement_status": lot.get("settlement_status"),
+        },
+        "sales_invoice_posting_evidence": posting,
+        "collection_status": (
+            "OUTSTANDING" if "OUTSTANDING" in collection_states
+            else "SETTLED" if collection_states else "NOT_APPLICABLE"
+        ),
+        "user_can_submit_processor_lot": has_submit,
+        "enabled": enabled in ("1", "true"),
+        "obligation_model_available": False,
+        "active_carry_forward_obligations": [],
+    }
 
 
 def _sales_invoice_submission_readiness_context(api, lot, po, sco, report):
