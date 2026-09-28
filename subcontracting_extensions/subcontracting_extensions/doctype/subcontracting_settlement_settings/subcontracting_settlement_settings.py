@@ -9,11 +9,15 @@ from subcontracting_extensions.settlement_method_policy import (
 	SettlementMethodPolicyError,
 	normalize_method_rows,
 )
+from subcontracting_extensions.settlement_action_authority import (
+	SettlementActionAuthorityError,
+	normalize_action_rows,
+)
 
 
 class SubcontractingSettlementSettings(Document):
 	def before_validate(self):
-		"""Seed missing methods and restore every fixed catalogue property."""
+		"""Restore method metadata and validate action roles without reseeding."""
 		try:
 			rows = normalize_method_rows(self.get("allowed_settlement_methods"))
 		except SettlementMethodPolicyError as error:
@@ -33,6 +37,26 @@ class SubcontractingSettlementSettings(Document):
 			row.idx = index
 			ordered.append(row)
 		self.set("allowed_settlement_methods", ordered)
+
+		try:
+			action_rows = normalize_action_rows(
+				self.get("controlled_action_roles"),
+				role_exists=lambda role: frappe.db.exists("Role", role),
+			)
+			existing_actions = {
+				(row.action_code, row.role): row
+				for row in (self.get("controlled_action_roles") or [])
+			}
+			ordered_actions = []
+			for index, values in enumerate(action_rows, start=1):
+				row = existing_actions[(values["action_code"], values["role"])]
+				for fieldname, value in values.items():
+					row.set(fieldname, value)
+				row.idx = index
+				ordered_actions.append(row)
+			self.set("controlled_action_roles", ordered_actions)
+		except SettlementActionAuthorityError as error:
+			frappe.throw(_(str(error)), title=_("Invalid Settlement Action Authorities"))
 
 		# These safety requirements are intentionally not administrator-disableable.
 		self.require_recovery_customer_for_sales_invoice = 1

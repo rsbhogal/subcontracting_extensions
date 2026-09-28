@@ -140,10 +140,12 @@ doc_events = {
 				"validate_purchase_invoice_supplier_identity"
 			),
 		],
-		"before_submit": (
-			"subcontracting_extensions.scripts.purchase_invoice."
-			"prevent_processor_first_purchase_invoice_submit"
-		),
+		"before_submit": [
+			("subcontracting_extensions.scripts.purchase_invoice."
+			 "prevent_processor_first_purchase_invoice_submit"),
+			("subcontracting_extensions.scripts.purchase_invoice."
+			 "require_settlement_debit_note_submit"),
+		],
 		"after_insert": (
 			"subcontracting_extensions.subcontracting_extensions.doctype."
 			"processor_lot_receipt.processor_lot_receipt."

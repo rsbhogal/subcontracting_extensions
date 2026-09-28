@@ -2304,6 +2304,11 @@ def create_processor_lot_debit_note(
     if not processor_lot:
         frappe.throw(_("Processor Lot is required."))
 
+    from subcontracting_extensions.settlement_action_authority import require_settlement_action
+    require_settlement_action("CREATE_DRAFT_DEBIT_NOTE")
+    if not frappe.has_permission("Purchase Invoice", "create"):
+        raise frappe.PermissionError("Purchase Invoice create permission is required")
+
     if not business_classification:
         frappe.throw(_("Business Classification is required."))
 
@@ -2315,7 +2320,7 @@ def create_processor_lot_debit_note(
         )
 
     lot_for_scope = frappe.get_doc("Processor Lot", processor_lot)
-    lot_for_scope.check_permission("write")
+    lot_for_scope.check_permission("read")
     _block_multi_item_settlement(frappe.get_doc("Subcontracting Order", lot_for_scope.subcontracting_order))
 
     # A residual Debit Note is the final settlement step. Every generated
@@ -2392,7 +2397,9 @@ def create_processor_lot_debit_note(
         lot.generated_document = debit_note.name
         lot.debit_note = debit_note.name
         lot.settlement_status = "Debit Note Created"
-        lot.save()
+        # This service owns only the settlement linkage after generating the
+        # draft; accounting users need no general Processor Lot write grant.
+        lot.save(ignore_permissions=True)
         resulting_status = "Debit Note Created"
 
     return {

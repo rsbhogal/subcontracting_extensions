@@ -56,7 +56,7 @@
    "read_only": 1
   },
   {
-   "description": "Role required for a later controlled execution action. Empty means the execution checkpoint must apply its own fixed role policy.",
+   "description": "Optional role for controlled treatment selection and policy reconciliation. This role never authorizes draft creation, submission, waiver, or closure.",
    "fieldname": "approval_role",
    "fieldtype": "Link",
    "label": "Approval Role",

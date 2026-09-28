@@ -103,11 +103,11 @@ def create_sales_invoice_draft(
         raise ValueError("Transitional Tally coordination is not enabled")
     if (settings.get("external_invoice_system_name") or "Tally") != "Tally":
         raise ValueError("External invoice system changed")
-    method = get_method_contract(settings.get("allowed_settlement_methods") or [],
-                                 "SALES_INVOICE", "Shortage")
-    role = method.get("approval_role")
-    if role and role not in api.get_roles():
-        raise PermissionError(f"Draft creation requires role {role}")
+    get_method_contract(settings.get("allowed_settlement_methods") or [],
+                        "SALES_INVOICE", "Shortage")
+    # Method approval belongs to the earlier treatment decision. The
+    # independent System Manager and native Sales Invoice creation gates above
+    # remain in force until a distinct Sales Invoice action is configured.
 
     rules = _read_rules(api)
     for name in sorted(rule.get("name") for rule in rules):

@@ -12,6 +12,30 @@ from subcontracting_extensions.overrides.posting_date_flow import (
 PRECISION = 6
 
 
+def require_settlement_debit_note_submit(doc, method=None):
+    """Apply an additional authority only to the current linked settlement return."""
+    lot_name = doc.get("custom_processor_lot_settlement")
+    current_links = frappe.get_all(
+        "Processor Lot", filters={"debit_note": doc.name},
+        fields=["name"], limit_page_length=2,
+    )
+    if not lot_name and not current_links:
+        return
+    if (not lot_name or len(current_links) != 1
+            or current_links[0]["name"] != lot_name):
+        frappe.throw(_("The settlement Debit Note header and current Processor Lot link must agree."))
+    if not doc.get("is_return"):
+        frappe.throw(_("A Processor Lot settlement Debit Note must be a return."))
+    lot = frappe.get_doc("Processor Lot", lot_name)
+    if (lot.get("debit_note") != doc.name
+            or lot.get("generated_document") != doc.name
+            or lot.get("generated_document_type") != "Purchase Invoice"):
+        frappe.throw(_("The current Processor Lot Debit Note linkage does not match."))
+    from subcontracting_extensions.settlement_action_authority import require_settlement_action
+    require_settlement_action("SUBMIT_SETTLEMENT_DEBIT_NOTE")
+    doc.check_permission("submit")
+
+
 def _checkpoint_context(doc, purchase_receipt=None):
 	if doc.get("is_return"):
 		return None

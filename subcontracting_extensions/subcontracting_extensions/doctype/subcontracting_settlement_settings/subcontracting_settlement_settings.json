@@ -8,6 +8,9 @@
   "settlement_methods_section",
   "settlement_methods_help",
   "allowed_settlement_methods",
+  "action_authority_section",
+  "action_authority_help",
+  "controlled_action_roles",
   "policy_controls_section",
   "allow_processor_lot_policy_override",
   "require_recovery_customer_for_sales_invoice",
@@ -34,6 +37,22 @@
    "label": "Settlement Methods",
    "options": "Subcontracting Allowed Settlement Method",
    "reqd": 1
+  },
+  {
+   "fieldname": "action_authority_section",
+   "fieldtype": "Section Break",
+   "label": "Controlled Settlement Action Authorities"
+  },
+  {
+   "fieldname": "action_authority_help",
+   "fieldtype": "HTML",
+   "options": "<p class=\"text-muted\">Each enabled role permits only the named controlled action. Normal document permissions and all business checks also apply. Method approval roles authorize treatment decisions only. Removing every role for an action denies that action.</p>"
+  },
+  {
+   "fieldname": "controlled_action_roles",
+   "fieldtype": "Table",
+   "label": "Action Roles",
+   "options": "Subcontracting Settlement Action Role"
   },
   {
    "fieldname": "policy_controls_section",
