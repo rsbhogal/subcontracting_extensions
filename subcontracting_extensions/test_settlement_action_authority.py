@@ -11,7 +11,7 @@ from subcontracting_extensions import settlement_action_authority as authority
 class TestSettlementActionAuthority(unittest.TestCase):
     def test_default_catalogue_and_roles(self):
         rows = authority.initial_action_rows()
-        self.assertEqual(len(rows), 16)
+        self.assertEqual(len(rows), 18)
         self.assertEqual({r["action_code"] for r in rows}, set(authority.ACTION_LABELS))
         self.assertEqual(len({(r["action_code"], r["role"]) for r in rows}), len(rows))
         self.assertTrue(all(r["enabled"] for r in rows))
@@ -130,7 +130,7 @@ class TestOneTimeSeed(unittest.TestCase):
         with patch.object(seed_settlement_action_roles.frappe, "get_single", return_value=settings), \
              patch.object(seed_settlement_action_roles.frappe.db, "exists", return_value=True):
             seed_settlement_action_roles.execute()
-        self.assertEqual(len(calls), 17)
+        self.assertEqual(len(calls), 19)
         self.assertEqual(calls[-1], ("save", {"ignore_permissions": True}))
 
 

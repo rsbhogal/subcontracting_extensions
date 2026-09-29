@@ -34,6 +34,6 @@
   {"default":"0","fieldname":"lot_closure_authorized","fieldtype":"Check","label":"Lot Closure Authorized","read_only":1}
  ],
  "is_submittable":0,"module":"Subcontracting Extensions","name":"Processor Lot Sales Invoice Submission Event","naming_rule":"Expression (old style)",
- "permissions":[{"read":1,"report":1,"export":1,"role":"System Manager"},{"read":1,"report":1,"role":"Accounts Manager"}],
+ "permissions":[{"read":1,"report":1,"export":1,"role":"System Manager"},{"read":1,"report":1,"role":"Accounts Manager"},{"read":1,"report":1,"role":"Accounts User"}],
  "sort_field":"creation","sort_order":"DESC","states":[]
 }

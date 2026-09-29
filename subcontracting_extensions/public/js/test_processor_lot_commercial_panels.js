@@ -399,5 +399,22 @@ function commercial() {
     await pending;
     assert.strictEqual(frm.__j19_commercial_report, null);
 
+    const releasedRow = {
+        commercial_scope_key: 'SCOPE-<unsafe>',
+        invoice_preparation_release_available: true,
+        retained_material_sales_invoice_draft_readiness: {
+            applicable: true, draft_values: {}, blocking_issues: [],
+        },
+    };
+    let releaseMarkup = context.j19_sales_invoice_draft_readiness_html(releasedRow);
+    assert(releaseMarkup.includes('data-j19-release-invoice'));
+    assert(releaseMarkup.includes('SCOPE-&lt;unsafe&gt;'));
+    assert(!releaseMarkup.includes('SCOPE-<unsafe>'));
+    releasedRow.invoice_preparation_release_available = false;
+    releasedRow.invoice_preparation_release = {name: 'PLSIR-00001'};
+    releaseMarkup = context.j19_sales_invoice_draft_readiness_html(releasedRow);
+    assert(releaseMarkup.includes('Released to Accounts'));
+    assert(!releaseMarkup.includes('data-j19-release-invoice'));
+
     console.log("J19A3 read-only commercial panel, mixed UOM, escaping, permissions and stale responses: PASS");
 })().catch(error => {console.error(error); process.exitCode = 1;});

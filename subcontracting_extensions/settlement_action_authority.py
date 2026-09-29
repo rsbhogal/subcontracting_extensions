@@ -16,6 +16,7 @@ ACTION_LABELS = {
     "REVERSE_OBLIGATION_ENTRY": "Reverse Obligation Entry",
     "CREATE_DRAFT_RETAINED_MATERIAL_SALES_INVOICE": "Create Retained-Material Sales Invoice Draft",
     "SUBMIT_RETAINED_MATERIAL_SALES_INVOICE": "Submit Retained-Material Sales Invoice",
+    "RELEASE_RETAINED_MATERIAL_INVOICE_PREPARATION": "Release Retained-Material Invoice Preparation",
 }
 
 DEFAULT_ACTION_ROLES = {
@@ -31,6 +32,9 @@ DEFAULT_ACTION_ROLES = {
     "REVERSE_OBLIGATION_ENTRY": ("System Manager",),
     "CREATE_DRAFT_RETAINED_MATERIAL_SALES_INVOICE": ("System Manager",),
     "SUBMIT_RETAINED_MATERIAL_SALES_INVOICE": ("System Manager",),
+    "RELEASE_RETAINED_MATERIAL_INVOICE_PREPARATION": (
+        "Purchase Manager", "System Manager",
+    ),
 }
 
 

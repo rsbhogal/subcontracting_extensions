@@ -1,0 +1,172 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "PLSIR-.#####",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "release_key",
+  "processor_lot",
+  "scope_key",
+  "sco_supplied_item",
+  "sco_finished_item",
+  "material_disposition",
+  "disposition_revision",
+  "commercial_classification",
+  "classification_revision",
+  "treatment_revision",
+  "treatment_decision_event",
+  "policy_reconciliation_event",
+  "reason",
+  "released_by",
+  "released_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "release_key",
+   "fieldtype": "Data",
+   "label": "Release Key",
+   "read_only": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "processor_lot",
+   "fieldtype": "Link",
+   "label": "Processor Lot",
+   "read_only": 1,
+   "reqd": 1,
+   "options": "Processor Lot",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "scope_key",
+   "fieldtype": "Data",
+   "label": "Scope Key",
+   "read_only": 1,
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "sco_supplied_item",
+   "fieldtype": "Data",
+   "label": "Sco Supplied Item",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "sco_finished_item",
+   "fieldtype": "Data",
+   "label": "Sco Finished Item",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "material_disposition",
+   "fieldtype": "Link",
+   "label": "Material Disposition",
+   "read_only": 1,
+   "reqd": 1,
+   "options": "Processor Lot Material Disposition"
+  },
+  {
+   "fieldname": "disposition_revision",
+   "fieldtype": "Int",
+   "label": "Disposition Revision",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "commercial_classification",
+   "fieldtype": "Link",
+   "label": "Commercial Classification",
+   "read_only": 1,
+   "reqd": 1,
+   "options": "Processor Lot Commercial Classification"
+  },
+  {
+   "fieldname": "classification_revision",
+   "fieldtype": "Int",
+   "label": "Classification Revision",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "treatment_revision",
+   "fieldtype": "Int",
+   "label": "Treatment Revision",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "treatment_decision_event",
+   "fieldtype": "Link",
+   "label": "Treatment Decision Event",
+   "read_only": 1,
+   "reqd": 1,
+   "options": "Processor Lot Commercial Decision Event"
+  },
+  {
+   "fieldname": "policy_reconciliation_event",
+   "fieldtype": "Link",
+   "label": "Policy Reconciliation Event",
+   "read_only": 1,
+   "reqd": 1,
+   "options": "Processor Lot Policy Reconciliation Event"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "released_by",
+   "fieldtype": "Link",
+   "label": "Released By",
+   "read_only": 1,
+   "reqd": 1,
+   "options": "User"
+  },
+  {
+   "fieldname": "released_at",
+   "fieldtype": "Datetime",
+   "label": "Released At",
+   "read_only": 1,
+   "reqd": 1,
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 0,
+ "module": "Subcontracting Extensions",
+ "name": "Processor Lot Sales Invoice Preparation Release",
+ "naming_rule": "Expression (old style)",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "Purchase Manager",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Accounts User",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

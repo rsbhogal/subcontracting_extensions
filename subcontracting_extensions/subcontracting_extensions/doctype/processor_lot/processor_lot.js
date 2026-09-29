@@ -680,6 +680,13 @@ function j19_sales_invoice_draft_readiness_html(row) {
     const issues = (readiness.blocking_issues || []).map(code =>
         `<li>${j14_escape(j19_decision_label(code))}</li>`).join("");
     const coordinated_number = reservation.reserved_invoice_number || forecast.forecast_number || "—";
+    const release = row.invoice_preparation_release || {};
+    const release_html = release.name
+        ? `<div>${j14_badge(__("Released to Accounts"), "green")} ${j14_escape(release.name)}</div>`
+        : row.invoice_preparation_release_available
+        ? `<button type="button" class="btn btn-xs btn-primary" data-j19-release-invoice
+            data-j19-scope="${j14_escape(row.commercial_scope_key)}">${j14_escape(__("Release Invoice Preparation to Accounts"))}</button>`
+        : "";
     const coordination_text = submission.sales_invoice
         ? __("Controlled Sales Invoice {0} is submitted. Tally number coordination is complete; Processor Lot closure remains deferred.", [submission.sales_invoice])
         : creation.sales_invoice
@@ -707,6 +714,7 @@ function j19_sales_invoice_draft_readiness_html(row) {
             j14_escape(draft.warehouse || "—"),
         ]])}
         ${warning}
+        ${release_html}
         ${issues ? `<div>${j14_badge(__("Readiness blockers"), "amber")}<ul>${issues}</ul></div>` : ""}
         <p class="text-muted">${j14_escape(__(submission.name
             ? "Controlled Sales Invoice is submitted and posted. Processor Lot closure remains unauthorised."
@@ -1003,6 +1011,13 @@ function j19_bind_decision_actions(frm, wrapper) {
         const row = (frm.__j19_commercial_report?.components || [])[Number(this.dataset.j19Index)];
         if (row) j19_open_material_disposition_dialog(frm, row, this);
     });
+    const releases = wrapper?.find?.("[data-j19-release-invoice]");
+    releases?.off?.("click.j19c3").on?.("click.j19c3", function () {
+        const row = (frm.__j19_commercial_report?.components || []).find(
+            item => item.commercial_scope_key === this.dataset.j19Scope
+        );
+        if (row) j19_release_invoice_preparation(frm, row, this);
+    });
     const statutory = wrapper?.find?.("[data-j19-statutory-confirm]");
     statutory?.off?.("click.j19b2l").on?.("click.j19b2l", function () {
         const scope = this.dataset.j19Scope;
@@ -1019,6 +1034,36 @@ function j19_bind_decision_actions(frm, wrapper) {
         );
         if (row) j19_submit_controlled_sales_invoice(frm, row, this);
     });
+}
+
+function j19_release_invoice_preparation(frm, row, button) {
+    frappe.prompt([
+        {fieldtype: "HTML", fieldname: "warning", options:
+            `<div class="alert alert-warning">${j14_escape(__(
+                "Release this exact retained-material Sales Invoice scope to Accounts. This records a Purchase handoff; it does not reserve a number or create an invoice."))}</div>`},
+        {fieldtype: "Small Text", fieldname: "reason", label: __("Release Reason"), reqd: 1},
+    ], async values => {
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+            await frappe.call({
+                method: "subcontracting_extensions.material_reconciliation_ui.release_retained_material_invoice_preparation",
+                args: {
+                    processor_lot: frm.doc.name,
+                    scope_identity: {sco_supplied_item: row.sco_supplied_item,
+                        sco_finished_item: row.sco_finished_item},
+                    reason: values.reason,
+                    expected_processor_lot_modified: frm.doc.modified,
+                    expected_scope_key: row.commercial_scope_key,
+                    expected_treatment_event: row.persisted_classification?.last_decision_event,
+                    expected_treatment_revision: row.persisted_classification?.treatment_revision,
+                }, freeze: true, freeze_message: __("Releasing invoice preparation"),
+            });
+            await render_j14_material_panel(frm);
+        } finally {
+            button.disabled = false;
+        }
+    }, __("Release Invoice Preparation"), __("Release to Accounts"));
 }
 
 function j19_submit_controlled_sales_invoice(frm, row, button) {

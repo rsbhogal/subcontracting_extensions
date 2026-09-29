@@ -52,6 +52,10 @@ from subcontracting_extensions.retained_material_sales_invoice_submission import
     submit_sales_invoice as persist_retained_material_sales_invoice_submission,
 )
 from subcontracting_extensions.settlement_action_authority import can_settlement_action
+from subcontracting_extensions.retained_material_invoice_release import (
+    current_release,
+    release_invoice_preparation as persist_invoice_preparation_release,
+)
 
 
 @frappe.whitelist()
@@ -87,6 +91,7 @@ def get_commercial_preview_panel(processor_lot):
     if not cint(frappe.conf.get("v2_component_commercial_preview")):
         return {"enabled": False}
     report = get_component_commercial_preview(processor_lot)
+    report = _attach_invoice_preparation_release(report, processor_lot)
     report = _restrict_controlled_sales_invoice_buttons(report)
     report = attach_material_disposition_capabilities(
         frappe,
@@ -99,6 +104,33 @@ def get_commercial_preview_panel(processor_lot):
         enabled=bool(cint(frappe.conf.get("v2_component_commercial_classification"))),
     )
     return dict(report, enabled=True)
+
+
+def _attach_invoice_preparation_release(report, processor_lot, api=frappe):
+    """Read-only UI aid; the release endpoint rechecks current evidence."""
+    from subcontracting_extensions.retained_material_invoice_release import _identity
+
+    for row in report.get("components") or []:
+        if (row.get("persisted_classification") or {}).get("selected_treatment_method") != "SALES_INVOICE":
+            continue
+        try:
+            _identity(row)
+        except ValueError:
+            continue
+        event = current_release(api, row, processor_lot=processor_lot)
+        row["invoice_preparation_release"] = event and {
+            "name": event.name, "released_by": event.released_by,
+            "released_at": event.released_at,
+        }
+        row["invoice_preparation_release_available"] = bool(
+            not event
+            and cint(api.conf.get("v2_retained_material_invoice_preparation_release"))
+            and can_settlement_action(
+                "RELEASE_RETAINED_MATERIAL_INVOICE_PREPARATION", api=api,
+            )
+            and api.get_doc("Processor Lot", processor_lot).has_permission("write")
+        )
+    return report
 
 
 def _restrict_controlled_sales_invoice_buttons(report, api=frappe):
@@ -216,6 +248,21 @@ def select_retained_material_treatment(
         expected_disposition_revision, expected_last_disposition_event,
         expected_classification_revision, expected_treatment_revision,
         expected_last_decision_event,
+    )
+
+
+@frappe.whitelist()
+def release_retained_material_invoice_preparation(
+    processor_lot, scope_identity, reason, expected_processor_lot_modified,
+    expected_scope_key, expected_treatment_event, expected_treatment_revision,
+):
+    """Feature-gated Purchase handoff; creates only immutable release evidence."""
+    if not cint(frappe.conf.get("v2_retained_material_invoice_preparation_release")):
+        frappe.throw("Retained-material invoice preparation release is not enabled")
+    return persist_invoice_preparation_release(
+        frappe, get_component_commercial_preview, processor_lot,
+        _parse_json(scope_identity), reason, expected_processor_lot_modified,
+        expected_scope_key, expected_treatment_event, expected_treatment_revision,
     )
 
 
