@@ -17,6 +17,9 @@ ACTION_LABELS = {
     "CREATE_DRAFT_RETAINED_MATERIAL_SALES_INVOICE": "Create Retained-Material Sales Invoice Draft",
     "SUBMIT_RETAINED_MATERIAL_SALES_INVOICE": "Submit Retained-Material Sales Invoice",
     "RELEASE_RETAINED_MATERIAL_INVOICE_PREPARATION": "Release Retained-Material Invoice Preparation",
+    "RESERVE_RETAINED_MATERIAL_INVOICE_NUMBER": "Reserve Retained-Material Invoice Number",
+    "CONFIRM_RETAINED_MATERIAL_TALLY_NUMBER": "Confirm Retained-Material Tally Number",
+    "CONFIRM_RETAINED_MATERIAL_STATUTORY_EVIDENCE": "Confirm Retained-Material Statutory Evidence",
 }
 
 DEFAULT_ACTION_ROLES = {
@@ -30,11 +33,18 @@ DEFAULT_ACTION_ROLES = {
     "RECORD_OBLIGATION_SETTLEMENT": ("Accounts Manager", "System Manager"),
     "APPROVE_WAIVER": ("Director - Sales", "System Manager"),
     "REVERSE_OBLIGATION_ENTRY": ("System Manager",),
-    "CREATE_DRAFT_RETAINED_MATERIAL_SALES_INVOICE": ("System Manager",),
-    "SUBMIT_RETAINED_MATERIAL_SALES_INVOICE": ("System Manager",),
+    "CREATE_DRAFT_RETAINED_MATERIAL_SALES_INVOICE": (
+        "Accounts User", "System Manager",
+    ),
+    "SUBMIT_RETAINED_MATERIAL_SALES_INVOICE": (
+        "Accounts User", "System Manager",
+    ),
     "RELEASE_RETAINED_MATERIAL_INVOICE_PREPARATION": (
         "Purchase Manager", "System Manager",
     ),
+    "RESERVE_RETAINED_MATERIAL_INVOICE_NUMBER": ("Accounts User", "System Manager"),
+    "CONFIRM_RETAINED_MATERIAL_TALLY_NUMBER": ("Accounts User", "System Manager"),
+    "CONFIRM_RETAINED_MATERIAL_STATUTORY_EVIDENCE": ("Accounts User", "System Manager"),
 }
 
 

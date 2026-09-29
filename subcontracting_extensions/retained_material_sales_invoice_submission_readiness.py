@@ -243,10 +243,11 @@ def _assess(row, context):
         "statutory_evidence_confirmation_available": bool(
             context.get("statutory_evidence_confirmation_enabled")
             and tally_lead and not confirmation_count
-            and set(issues) == {
+            and set(issues).issubset({
                 "TALLY_STATUTORY_REFERENCE_NOT_RECORDED",
                 "TALLY_VEHICLE_NUMBER_NOT_RECORDED",
-            }
+                "TALLY_TRANSPORT_RECEIPT_DATE_NOT_RECORDED",
+            })
         ),
         "controlled_submission_available": bool(
             context.get("sales_invoice_submission_enabled")

@@ -137,16 +137,30 @@ def _restrict_controlled_sales_invoice_buttons(report, api=frappe):
     """UI visibility only; the submission service and hook enforce authority."""
     for row in report.get("components") or []:
         readiness = row.get("retained_material_sales_invoice_submission_readiness") or {}
-        if not readiness.get("controlled_submission_available"):
-            continue
-        allowed = can_settlement_action(
-            "SUBMIT_RETAINED_MATERIAL_SALES_INVOICE", api=api,
-        )
-        if not allowed:
+        if not row.get("invoice_preparation_release"):
             readiness["controlled_submission_available"] = False
+            readiness["statutory_evidence_confirmation_available"] = False
+            continue
+        if not (readiness.get("controlled_submission_available")
+                or readiness.get("statutory_evidence_confirmation_available")):
+            continue
+        submit_allowed = bool(
+            readiness.get("controlled_submission_available")
+            and can_settlement_action("SUBMIT_RETAINED_MATERIAL_SALES_INVOICE", api=api))
+        statutory_allowed = bool(
+            readiness.get("statutory_evidence_confirmation_available")
+            and can_settlement_action("CONFIRM_RETAINED_MATERIAL_STATUTORY_EVIDENCE", api=api))
+        if not submit_allowed and not statutory_allowed:
+            readiness["controlled_submission_available"] = False
+            readiness["statutory_evidence_confirmation_available"] = False
             continue
         invoice = api.get_doc("Sales Invoice", readiness.get("sales_invoice"))
-        readiness["controlled_submission_available"] = bool(invoice.has_permission("submit"))
+        if readiness.get("controlled_submission_available"):
+            readiness["controlled_submission_available"] = bool(
+                submit_allowed and invoice.has_permission("submit"))
+        if readiness.get("statutory_evidence_confirmation_available"):
+            readiness["statutory_evidence_confirmation_available"] = bool(
+                statutory_allowed and invoice.has_permission("write"))
     return report
 
 

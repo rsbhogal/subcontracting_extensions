@@ -8,6 +8,7 @@ from subcontracting_extensions.retained_material_policy_reconciliation import (
     _lock, _same_modified,
 )
 from subcontracting_extensions.settlement_action_authority import require_settlement_action
+from subcontracting_extensions.retained_material_invoice_release import require_current_release
 
 
 CONTRACT_VERSION = "J19B2M"
@@ -88,6 +89,7 @@ def submit_sales_invoice(
     if len(matches) != 1:
         raise ValueError("Controlled Sales Invoice scope is missing or ambiguous")
     row, readiness = matches[0]
+    require_current_release(api, row, processor_lot=lot.name)
     if (readiness.get("blocking_issues")
             or readiness.get("readiness_code")
             != "SALES_INVOICE_DRAFT_READY_FOR_FUTURE_CONTROLLED_SUBMISSION"):

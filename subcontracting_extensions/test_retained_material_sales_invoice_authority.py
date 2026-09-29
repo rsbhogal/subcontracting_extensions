@@ -19,8 +19,10 @@ SUBMIT = "SUBMIT_RETAINED_MATERIAL_SALES_INVOICE"
 class TestSalesInvoiceAuthority(unittest.TestCase):
     def test_separate_initial_roles_and_configurable_denial(self):
         rows = authority.initial_action_rows()
-        self.assertEqual([r["role"] for r in rows if r["action_code"] == DRAFT], ["System Manager"])
-        self.assertEqual([r["role"] for r in rows if r["action_code"] == SUBMIT], ["System Manager"])
+        self.assertEqual([r["role"] for r in rows if r["action_code"] == DRAFT],
+                         ["Accounts User", "System Manager"])
+        self.assertEqual([r["role"] for r in rows if r["action_code"] == SUBMIT],
+                         ["Accounts User", "System Manager"])
         rows = [row for row in rows if row["action_code"] != DRAFT]
         self.assertFalse(authority.allowed_for_roles(rows, DRAFT, {"System Manager"}))
         self.assertTrue(authority.allowed_for_roles(rows, SUBMIT, {"System Manager"}))
@@ -45,7 +47,8 @@ class TestSalesInvoiceAuthority(unittest.TestCase):
         with patch.object(migration.frappe, "get_single", return_value=settings), \
              patch.object(migration.frappe.db, "exists", return_value=True):
             migration.execute()
-        self.assertEqual([row["action_code"] for _, row in added], [DRAFT, SUBMIT])
+        self.assertEqual([row["action_code"] for _, row in added],
+                         [DRAFT, DRAFT, SUBMIT, SUBMIT])
         settings.save.assert_called_once_with(ignore_permissions=True)
 
     def test_migration_preserves_existing_action_decisions(self):
@@ -107,7 +110,8 @@ class TestSalesInvoiceSubmissionHook(unittest.TestCase):
     def test_ui_suppresses_action_without_role_or_native_permission(self):
         from subcontracting_extensions import material_reconciliation_ui as ui
         readiness = {"controlled_submission_available": True, "sales_invoice": "SI-1"}
-        report = {"components": [{"retained_material_sales_invoice_submission_readiness": readiness}]}
+        report = {"components": [{"invoice_preparation_release": {"name": "RELEASE-1"},
+                                  "retained_material_sales_invoice_submission_readiness": readiness}]}
         with patch.object(ui, "can_settlement_action", return_value=False):
             ui._restrict_controlled_sales_invoice_buttons(report)
         self.assertFalse(readiness["controlled_submission_available"])

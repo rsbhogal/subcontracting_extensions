@@ -11,6 +11,7 @@ from subcontracting_extensions.retained_material_policy_reconciliation import (
     _lock, _same_modified,
 )
 from subcontracting_extensions.settlement_action_authority import require_settlement_action
+from subcontracting_extensions.retained_material_invoice_release import require_current_release
 from subcontracting_extensions.sales_invoice_number_reservation import (
     MODE, _exact_row, _read_rules,
 )
@@ -127,6 +128,7 @@ def create_sales_invoice_draft(
     report = read_preview(lot.name)
     row = _exact_row(report, {"sco_supplied_item": reservation.get("sco_supplied_item"),
                               "sco_finished_item": reservation.get("sco_finished_item")})
+    require_current_release(api, row, processor_lot=lot.name)
     readiness = row.get("retained_material_sales_invoice_draft_readiness") or {}
     if (readiness.get("blocking_issues") or not readiness.get("applicable")
             or readiness.get("tally_confirmation_status") != "CONFIRMED"):

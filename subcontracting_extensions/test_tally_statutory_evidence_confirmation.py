@@ -26,7 +26,8 @@ class TestTallyStatutoryEvidenceConfirmation(unittest.TestCase):
 
     def test_requires_permission_attestation_reason_and_stale_checks(self):
         for marker in (
-            "_require_system_manager(api)", "confirmation_attested",
+            'require_settlement_action("CONFIRM_RETAINED_MATERIAL_STATUTORY_EVIDENCE", api=api)',
+            "confirmation_attested",
             "validate_reason(reason)", "_same_modified(invoice",
             "expected_statutory_evidence", "EXPECTED_BLOCKERS",
             'api.db.count("Stock Ledger Entry"', 'api.db.count("GL Entry"',

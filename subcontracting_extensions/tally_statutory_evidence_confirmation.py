@@ -4,8 +4,10 @@ import json
 
 from subcontracting_extensions.commercial_classification_policy import validate_reason
 from subcontracting_extensions.retained_material_policy_reconciliation import (
-    _lock, _require_system_manager, _same_modified,
+    _lock, _same_modified,
 )
+from subcontracting_extensions.retained_material_invoice_release import require_current_release
+from subcontracting_extensions.settlement_action_authority import require_settlement_action
 
 
 CONTRACT_VERSION = "J19B2L"
@@ -13,6 +15,7 @@ OUTCOME = "NOT_APPLICABLE_NO_PHYSICAL_MOVEMENT"
 EXPECTED_BLOCKERS = {
     "TALLY_STATUTORY_REFERENCE_NOT_RECORDED",
     "TALLY_VEHICLE_NUMBER_NOT_RECORDED",
+    "TALLY_TRANSPORT_RECEIPT_DATE_NOT_RECORDED",
 }
 
 
@@ -27,7 +30,7 @@ def confirm_no_physical_movement(
     from frappe.utils import cint, now_datetime
 
     reason = validate_reason(reason)
-    _require_system_manager(api)
+    require_settlement_action("CONFIRM_RETAINED_MATERIAL_STATUTORY_EVIDENCE", api=api)
     if not cint(confirmation_attested):
         raise ValueError("Explicit no-physical-movement attestation is required")
 
@@ -54,7 +57,7 @@ def confirm_no_physical_movement(
         raise ValueError("External statutory lead system changed")
 
     lot = api.get_doc("Processor Lot", invoice.get("custom_processor_lot_settlement"))
-    lot.check_permission("write")
+    lot.check_permission("read")
     _lock(api, "Processor Lot", lot.name)
     if (lot.get("docstatus") != 0
             or lot.get("settlement_status") not in (None, "", "Draft")
@@ -71,7 +74,8 @@ def confirm_no_physical_movement(
     if len(matches) != 1:
         raise ValueError("Controlled Sales Invoice scope is missing or ambiguous")
     row, readiness = matches[0]
-    if set(readiness.get("blocking_issues") or []) != EXPECTED_BLOCKERS:
+    require_current_release(api, row, processor_lot=lot.name)
+    if not set(readiness.get("blocking_issues") or []).issubset(EXPECTED_BLOCKERS):
         raise ValueError("Submission-readiness blockers changed; reload and review")
     disposition = row.get("persisted_material_disposition") or {}
     classification = row.get("persisted_classification") or {}
@@ -89,10 +93,7 @@ def confirm_no_physical_movement(
     expected_statutory = _json(expected_statutory_evidence) or {}
     if _canonical(live_statutory) != _canonical(expected_statutory):
         raise ValueError("Sales Invoice statutory fields changed; reload and review")
-    if live_statutory.get("ewaybill") or live_statutory.get("irn"):
-        raise ValueError("No-physical-movement outcome conflicts with statutory references")
-    if live_statutory.get("vehicle_no"):
-        raise ValueError("No-physical-movement outcome conflicts with vehicle evidence")
+    _validate_no_physical_movement_statutory(live_statutory)
 
     creation = api.get_doc("Processor Lot Sales Invoice Draft Creation Event", event)
     _lock(api, "Processor Lot Sales Invoice Draft Creation Event", creation.name)
@@ -148,6 +149,14 @@ def confirm_no_physical_movement(
 
 def _json(value):
     return json.loads(value) if isinstance(value, str) else value
+
+
+def _validate_no_physical_movement_statutory(statutory):
+    """An IRN can identify an invoice without implying physical transport."""
+    if statutory.get("ewaybill"):
+        raise ValueError("No-physical-movement outcome conflicts with an e-waybill")
+    if statutory.get("vehicle_no"):
+        raise ValueError("No-physical-movement outcome conflicts with vehicle evidence")
 
 
 def _canonical(value):

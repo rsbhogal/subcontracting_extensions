@@ -8,8 +8,10 @@ from subcontracting_extensions.document_naming_rule_resolver import (
     forecast_from_naming_rule, naming_rule_snapshot, resolve_document_naming_rule,
 )
 from subcontracting_extensions.retained_material_policy_reconciliation import (
-    _lock, _require_system_manager, _same_modified,
+    _lock, _same_modified,
 )
+from subcontracting_extensions.retained_material_invoice_release import require_current_release
+from subcontracting_extensions.settlement_action_authority import require_settlement_action
 from subcontracting_extensions.sales_invoice_number_reservation import (
     MODE, _exact_row, _read_rules,
 )
@@ -36,7 +38,7 @@ def confirm_tally_reservation(
     from frappe.utils import cint, now_datetime
 
     reason = validate_reason(reason)
-    _require_system_manager(api)
+    require_settlement_action("CONFIRM_RETAINED_MATERIAL_TALLY_NUMBER", api=api)
     if not cint(confirmation_attested):
         raise ValueError("Explicit confirmation that the number is reserved in Tally is required")
 
@@ -59,7 +61,7 @@ def confirm_tally_reservation(
         raise ValueError("Reserved invoice number already exists as a Sales Invoice")
 
     lot = api.get_doc("Processor Lot", reservation.get("processor_lot"))
-    lot.check_permission("write")
+    lot.check_permission("read")
     _lock(api, "Processor Lot", lot.name)
     lot = api.get_doc("Processor Lot", lot.name)
     _same_modified(lot, expected_processor_lot_modified, "Processor Lot")
@@ -95,9 +97,7 @@ def confirm_tally_reservation(
         raise ValueError("External invoice system changed; reload and review it")
     method = get_method_contract(settings.get("allowed_settlement_methods") or [],
                                  "SALES_INVOICE", "Shortage")
-    role = method.get("approval_role")
-    if role and role not in api.get_roles():
-        raise PermissionError(f"Tally confirmation requires role {role}")
+    # Method approval belongs to treatment selection, not Tally attestation.
 
     rules = _read_rules(api)
     for name in sorted(rule.get("name") for rule in rules):
@@ -117,6 +117,7 @@ def confirm_tally_reservation(
     identity = {"sco_supplied_item": reservation.get("sco_supplied_item"),
                 "sco_finished_item": reservation.get("sco_finished_item")}
     row = _exact_row(report, identity)
+    require_current_release(api, row, processor_lot=lot.name)
     readiness = row.get("retained_material_sales_invoice_draft_readiness") or {}
     if readiness.get("blocking_issues") or not readiness.get("applicable"):
         raise ValueError("Sales Invoice readiness changed; reload and review it")
