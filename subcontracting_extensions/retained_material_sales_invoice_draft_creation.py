@@ -8,8 +8,9 @@ from subcontracting_extensions.document_naming_rule_resolver import (
     forecast_from_naming_rule, naming_rule_snapshot, resolve_document_naming_rule,
 )
 from subcontracting_extensions.retained_material_policy_reconciliation import (
-    _lock, _require_system_manager, _same_modified,
+    _lock, _same_modified,
 )
+from subcontracting_extensions.settlement_action_authority import require_settlement_action
 from subcontracting_extensions.sales_invoice_number_reservation import (
     MODE, _exact_row, _read_rules,
 )
@@ -39,7 +40,7 @@ def create_sales_invoice_draft(
     from frappe.utils import cint, now_datetime
 
     reason = validate_reason(reason)
-    _require_system_manager(api)
+    require_settlement_action("CREATE_DRAFT_RETAINED_MATERIAL_SALES_INVOICE", api=api)
     if not cint(draft_creation_confirmed):
         raise ValueError("Explicit confirmation to create the Draft Sales Invoice is required")
     expected_rule = _json(expected_naming_rule_snapshot)
@@ -68,7 +69,7 @@ def create_sales_invoice_draft(
         raise ValueError("Reservation already has draft-creation evidence")
 
     lot = api.get_doc("Processor Lot", reservation.get("processor_lot"))
-    lot.check_permission("write")
+    lot.check_permission("read")
     _lock(api, "Processor Lot", lot.name)
     lot = api.get_doc("Processor Lot", lot.name)
     _same_modified(lot, expected_processor_lot_modified, "Processor Lot")
@@ -106,8 +107,8 @@ def create_sales_invoice_draft(
     get_method_contract(settings.get("allowed_settlement_methods") or [],
                         "SALES_INVOICE", "Shortage")
     # Method approval belongs to the earlier treatment decision. The
-    # independent System Manager and native Sales Invoice creation gates above
-    # remain in force until a distinct Sales Invoice action is configured.
+    # independent action authority and native Sales Invoice creation gates
+    # above remain in force.
 
     rules = _read_rules(api)
     for name in sorted(rule.get("name") for rule in rules):
@@ -253,13 +254,18 @@ def create_sales_invoice_draft(
 
 
 def prevent_uncontrolled_submission(doc, method=None):
-    """Keep every controlled retained-material invoice draft-only through J19B2J."""
-    if doc.flags.get("controlled_retained_material_submission"):
-        return
+    """Require the exact controlled service and action for a retained-material sale."""
     if (doc.get("custom_invoice_number_reservation")
             or doc.get("custom_tally_reservation_confirmation")):
         import frappe
-        frappe.throw("Controlled retained-material Sales Invoice submission is not authorized")
+        from frappe.utils import cint
+
+        if (not cint(frappe.conf.get("v2_retained_material_sales_invoice_submission"))
+                or not doc.flags.get("controlled_retained_material_submission")
+                or frappe.flags.get("controlled_retained_material_submission_doc") is not doc):
+            frappe.throw("Controlled retained-material Sales Invoice submission is not authorized")
+        require_settlement_action("SUBMIT_RETAINED_MATERIAL_SALES_INVOICE")
+        doc.check_permission("submit")
 
 
 def prevent_controlled_draft_deletion(doc, method=None):

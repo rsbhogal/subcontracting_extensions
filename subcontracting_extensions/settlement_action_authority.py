@@ -14,6 +14,8 @@ ACTION_LABELS = {
     "RECORD_OBLIGATION_SETTLEMENT": "Record Obligation Settlement",
     "APPROVE_WAIVER": "Approve Waiver",
     "REVERSE_OBLIGATION_ENTRY": "Reverse Obligation Entry",
+    "CREATE_DRAFT_RETAINED_MATERIAL_SALES_INVOICE": "Create Retained-Material Sales Invoice Draft",
+    "SUBMIT_RETAINED_MATERIAL_SALES_INVOICE": "Submit Retained-Material Sales Invoice",
 }
 
 DEFAULT_ACTION_ROLES = {
@@ -27,6 +29,8 @@ DEFAULT_ACTION_ROLES = {
     "RECORD_OBLIGATION_SETTLEMENT": ("Accounts Manager", "System Manager"),
     "APPROVE_WAIVER": ("Director - Sales", "System Manager"),
     "REVERSE_OBLIGATION_ENTRY": ("System Manager",),
+    "CREATE_DRAFT_RETAINED_MATERIAL_SALES_INVOICE": ("System Manager",),
+    "SUBMIT_RETAINED_MATERIAL_SALES_INVOICE": ("System Manager",),
 }
 
 
@@ -69,17 +73,18 @@ def allowed_for_roles(rows, action_code, roles):
                and row["role"] in roles for row in configured)
 
 
-def can_settlement_action(action_code, *, user=None):
+def can_settlement_action(action_code, *, user=None, api=None):
     """UI aid only; mutating services must call require_settlement_action."""
     if action_code not in ACTION_LABELS:
         raise SettlementActionAuthorityError(f"Unknown settlement action: {action_code or '(blank)'}")
-    settings = frappe.get_single("Subcontracting Settlement Settings")
+    context = api or frappe
+    settings = context.get_single("Subcontracting Settlement Settings")
     return allowed_for_roles(
         settings.get("controlled_action_roles"), action_code,
-        frappe.get_roles(user or frappe.session.user),
+        context.get_roles(user or context.session.user),
     )
 
 
-def require_settlement_action(action_code, *, user=None):
-    if not can_settlement_action(action_code, user=user):
+def require_settlement_action(action_code, *, user=None, api=None):
+    if not can_settlement_action(action_code, user=user, api=api):
         raise frappe.PermissionError(f"Controlled settlement action requires authority: {action_code}")

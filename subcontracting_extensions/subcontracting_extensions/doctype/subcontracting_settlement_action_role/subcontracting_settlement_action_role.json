@@ -4,12 +4,43 @@
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
- "field_order": ["action_code", "action_label", "role", "enabled"],
+ "field_order": [
+  "action_code",
+  "action_label",
+  "role",
+  "enabled"
+ ],
  "fields": [
-  {"fieldname": "action_code", "fieldtype": "Select", "in_list_view": 1, "label": "Action Code", "options": "\nCREATE_DRAFT_DEBIT_NOTE\nSUBMIT_SETTLEMENT_DEBIT_NOTE\nCARRY_FORWARD_OBLIGATIONS\nRECORD_OBLIGATION_SETTLEMENT\nAPPROVE_WAIVER\nREVERSE_OBLIGATION_ENTRY", "reqd": 1},
-  {"fieldname": "action_label", "fieldtype": "Data", "in_list_view": 1, "label": "Action", "read_only": 1},
-  {"fieldname": "role", "fieldtype": "Link", "in_list_view": 1, "label": "Role", "options": "Role", "reqd": 1},
-  {"default": "1", "fieldname": "enabled", "fieldtype": "Check", "in_list_view": 1, "label": "Enabled"}
+  {
+   "fieldname": "action_code",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Action Code",
+   "options": "\nCREATE_DRAFT_DEBIT_NOTE\nSUBMIT_SETTLEMENT_DEBIT_NOTE\nCARRY_FORWARD_OBLIGATIONS\nRECORD_OBLIGATION_SETTLEMENT\nAPPROVE_WAIVER\nREVERSE_OBLIGATION_ENTRY\nCREATE_DRAFT_RETAINED_MATERIAL_SALES_INVOICE\nSUBMIT_RETAINED_MATERIAL_SALES_INVOICE",
+   "reqd": 1
+  },
+  {
+   "fieldname": "action_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Action",
+   "read_only": 1
+  },
+  {
+   "fieldname": "role",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Role",
+   "options": "Role",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  }
  ],
  "istable": 1,
  "module": "Subcontracting Extensions",

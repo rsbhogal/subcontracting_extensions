@@ -5,8 +5,9 @@ from decimal import Decimal
 
 from subcontracting_extensions.commercial_classification_policy import validate_reason
 from subcontracting_extensions.retained_material_policy_reconciliation import (
-    _lock, _require_system_manager, _same_modified,
+    _lock, _same_modified,
 )
+from subcontracting_extensions.settlement_action_authority import require_settlement_action
 
 
 CONTRACT_VERSION = "J19B2M"
@@ -25,7 +26,7 @@ def submit_sales_invoice(
     from frappe.utils import cint, now_datetime
 
     reason = validate_reason(reason)
-    _require_system_manager(api)
+    require_settlement_action("SUBMIT_RETAINED_MATERIAL_SALES_INVOICE", api=api)
     if not cint(submission_confirmed):
         raise ValueError("Explicit Sales Invoice submission confirmation is required")
 
@@ -52,7 +53,7 @@ def submit_sales_invoice(
         raise ValueError("No-physical-movement confirmation does not match the invoice")
 
     lot = api.get_doc("Processor Lot", confirmation.get("processor_lot"))
-    lot.check_permission("write")
+    lot.check_permission("read")
     _lock(api, "Processor Lot", lot.name)
     lot = api.get_doc("Processor Lot", lot.name)
     if (lot.get("docstatus") != 0 or lot.get("settlement_status") != "Draft"
@@ -135,7 +136,15 @@ def submit_sales_invoice(
     invoice.set_posting_time = 1
     invoice._submitted_from_ui = 1
     invoice.flags.controlled_retained_material_submission = True
-    invoice.submit()
+    previous_submission_doc = api.flags.get("controlled_retained_material_submission_doc")
+    api.flags.controlled_retained_material_submission_doc = invoice
+    try:
+        invoice.submit()
+    finally:
+        if previous_submission_doc is None:
+            api.flags.pop("controlled_retained_material_submission_doc", None)
+        else:
+            api.flags.controlled_retained_material_submission_doc = previous_submission_doc
     if invoice.get("docstatus") != 1:
         raise ValueError("ERPNext did not submit the controlled Sales Invoice")
 

@@ -51,6 +51,7 @@ from subcontracting_extensions.tally_statutory_evidence_confirmation import (
 from subcontracting_extensions.retained_material_sales_invoice_submission import (
     submit_sales_invoice as persist_retained_material_sales_invoice_submission,
 )
+from subcontracting_extensions.settlement_action_authority import can_settlement_action
 
 
 @frappe.whitelist()
@@ -86,6 +87,7 @@ def get_commercial_preview_panel(processor_lot):
     if not cint(frappe.conf.get("v2_component_commercial_preview")):
         return {"enabled": False}
     report = get_component_commercial_preview(processor_lot)
+    report = _restrict_controlled_sales_invoice_buttons(report)
     report = attach_material_disposition_capabilities(
         frappe,
         report,
@@ -97,6 +99,23 @@ def get_commercial_preview_panel(processor_lot):
         enabled=bool(cint(frappe.conf.get("v2_component_commercial_classification"))),
     )
     return dict(report, enabled=True)
+
+
+def _restrict_controlled_sales_invoice_buttons(report, api=frappe):
+    """UI visibility only; the submission service and hook enforce authority."""
+    for row in report.get("components") or []:
+        readiness = row.get("retained_material_sales_invoice_submission_readiness") or {}
+        if not readiness.get("controlled_submission_available"):
+            continue
+        allowed = can_settlement_action(
+            "SUBMIT_RETAINED_MATERIAL_SALES_INVOICE", api=api,
+        )
+        if not allowed:
+            readiness["controlled_submission_available"] = False
+            continue
+        invoice = api.get_doc("Sales Invoice", readiness.get("sales_invoice"))
+        readiness["controlled_submission_available"] = bool(invoice.has_permission("submit"))
+    return report
 
 
 @frappe.whitelist()
