@@ -140,9 +140,27 @@ class TestSalesInvoiceSubmissionHook(unittest.TestCase):
             "grand_total": 236,
         }
         with patch.object(frappe, "get_all", return_value=[event]) as get_all:
-            protect_controlled_draft_integrity(doc)
+            protect_controlled_draft_integrity(doc, "validate")
         self.assertIn("coordination_mode", get_all.call_args.kwargs["fields"])
 
+
+    def test_native_validate_hook_checks_controlled_creation_evidence(self):
+        import frappe
+        from subcontracting_extensions.retained_material_sales_invoice_draft_creation import (
+            protect_controlled_draft_integrity,
+        )
+        ordinary = SimpleNamespace(get=lambda field: None, flags={})
+        fields = {"custom_processor_lot_settlement": "LOT", "items": []}
+        controlled = SimpleNamespace(name="SI-NEW", get=fields.get, flags={})
+        with patch.object(frappe, "get_all", return_value=[]) as get_all, \
+             patch.object(frappe, "throw", side_effect=ValueError) as throw:
+            protect_controlled_draft_integrity(ordinary, "validate")
+            get_all.assert_not_called()
+            with self.assertRaises(ValueError):
+                protect_controlled_draft_integrity(controlled, "validate")
+            controlled.flags["controlled_retained_material_draft_creation"] = True
+            protect_controlled_draft_integrity(controlled, "validate")
+            throw.assert_called_once_with("Controlled Sales Invoice has no draft-creation evidence")
 
     def test_ordinary_invoice_is_unaffected(self):
         from subcontracting_extensions.retained_material_sales_invoice_draft_creation import (

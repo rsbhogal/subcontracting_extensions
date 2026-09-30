@@ -289,7 +289,7 @@ def prevent_controlled_draft_deletion(doc, method=None):
         frappe.throw("Controlled retained-material Sales Invoice cannot be deleted")
 
 
-def protect_controlled_draft_integrity(doc):
+def protect_controlled_draft_integrity(doc, method=None):
     """After creation evidence exists, reject edits to controlled facts and lineage."""
     import frappe
     controlled = (doc.get("custom_processor_lot_settlement")
