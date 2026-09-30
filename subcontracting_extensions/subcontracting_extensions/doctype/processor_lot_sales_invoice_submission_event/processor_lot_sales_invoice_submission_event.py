@@ -14,7 +14,9 @@ class ProcessorLotSalesInvoiceSubmissionEvent(Document):
         if not self.is_new():
             frappe.throw(_("Sales Invoice submission events are immutable."))
         if (not self.submission_confirmed
-                or not self.erpnext_statutory_generation_suppressed
+                or self.statutory_lead_system not in ("Tally", "ERPNext")
+                or (self.statutory_lead_system == "Tally") != bool(
+                    self.erpnext_statutory_generation_suppressed)
                 or not self.blank_transport_override_applied):
             frappe.throw(_("Complete controlled submission evidence is required."))
         if self.lot_closure_authorized:

@@ -11,6 +11,7 @@ import json
 
 CONTRACT_VERSION = "J19B2K"
 TALLY_MODE = "ERPNEXT_FORECAST_WITH_TALLY_COORDINATION"
+from subcontracting_extensions.retained_material_invoice_mode import invoice_mode
 
 
 def attach_sales_invoice_submission_readiness(report, context):
@@ -60,6 +61,10 @@ def _assess(row, context):
     issues = []
     invoice = context.get("sales_invoice") or {}
     event = context.get("draft_creation_event") or {}
+    try:
+        historical_mode = invoice_mode(invoice, event)
+    except ValueError:
+        historical_mode = None
     disposition = row.get("persisted_material_disposition") or {}
     classification = row.get("persisted_classification") or {}
     lineage = draft_readiness.get("lineage") or {}
@@ -68,6 +73,8 @@ def _assess(row, context):
     submission_event = context.get("submission_event") or {}
     if submission_count:
         post_issues = []
+        if historical_mode is None:
+            _issue(post_issues, "CONTROLLED_SALES_INVOICE_MODE_LINEAGE_CHANGED")
         if submission_count != 1:
             _issue(post_issues, "AMBIGUOUS_CONTROLLED_SALES_INVOICE_SUBMISSION_EVENT")
         if invoice.get("docstatus") != 1:
@@ -87,7 +94,7 @@ def _assess(row, context):
             "sales_invoice": invoice.get("name"),
             "sales_invoice_modified": invoice.get("modified"),
             "submission_event": submission_event or None,
-            "statutory_lead_system": "Tally",
+            "statutory_lead_system": "Tally" if historical_mode == TALLY_MODE else "ERPNext",
             "controlled_submission_available": False,
             "stock_projection": {
                 "warehouse": submission_event.get("supplier_warehouse"),
@@ -135,6 +142,11 @@ def _assess(row, context):
             or invoice.get("custom_tally_reservation_confirmation")
             != event.get("tally_confirmation")):
         _issue(issues, "CONTROLLED_SALES_INVOICE_COORDINATION_LINEAGE_CHANGED")
+    try:
+        pinned_mode = invoice_mode(invoice, event)
+    except ValueError:
+        pinned_mode = None
+        _issue(issues, "CONTROLLED_SALES_INVOICE_MODE_LINEAGE_CHANGED")
 
     items = context.get("sales_invoice_items") or []
     if len(items) != 1:
@@ -179,7 +191,9 @@ def _assess(row, context):
     if context.get("settlement_started"):
         _issue(issues, "PROCESSOR_LOT_SETTLEMENT_ALREADY_BEGUN")
 
-    tally_lead = context.get("coordination_mode") == TALLY_MODE
+    tally_lead = pinned_mode == TALLY_MODE
+    if context.get("coordination_mode") != pinned_mode:
+        _issue(issues, "CONTROLLED_SALES_INVOICE_MODE_LINEAGE_CHANGED")
     statutory = context.get("statutory_evidence") or {}
     confirmation_count = context.get("statutory_evidence_confirmation_count") or 0
     confirmation = context.get("statutory_evidence_confirmation") or {}
@@ -201,8 +215,11 @@ def _assess(row, context):
             and confirmation.get("confirmation_attested")
             and _canonical(snapshot) == _canonical(statutory)
         )
-        if not controlled_no_movement:
-            _issue(issues, "TALLY_STATUTORY_EVIDENCE_CONFIRMATION_STALE")
+        lead = "Tally" if tally_lead else "ERPNext"
+        if not controlled_no_movement or (confirmation.get("external_statutory_system")
+                or ("Tally" if tally_lead else None)) != lead:
+            _issue(issues, "TALLY_STATUTORY_EVIDENCE_CONFIRMATION_STALE"
+                   if tally_lead else "ERPNEXT_STATUTORY_EVIDENCE_CONFIRMATION_STALE")
     if tally_lead:
         if (not controlled_no_movement and not statutory.get("ewaybill")
                 and statutory.get("ewaybill_applicable")):
@@ -242,7 +259,7 @@ def _assess(row, context):
         "statutory_evidence_confirmation": confirmation or None,
         "statutory_evidence_confirmation_available": bool(
             context.get("statutory_evidence_confirmation_enabled")
-            and tally_lead and not confirmation_count
+            and pinned_mode in (TALLY_MODE, "ERPNEXT_PRIMARY") and not confirmation_count
             and set(issues).issubset({
                 "TALLY_STATUTORY_REFERENCE_NOT_RECORDED",
                 "TALLY_VEHICLE_NUMBER_NOT_RECORDED",

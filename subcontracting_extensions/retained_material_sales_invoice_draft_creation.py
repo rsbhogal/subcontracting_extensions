@@ -16,6 +16,7 @@ from subcontracting_extensions.sales_invoice_number_reservation import (
     MODE, _exact_row, _read_rules,
 )
 from subcontracting_extensions.settlement_method_policy import get_method_contract
+from subcontracting_extensions.retained_material_invoice_mode import TALLY, invoice_mode
 
 
 CONTRACT_VERSION = "J19B2J"
@@ -170,6 +171,7 @@ def create_sales_invoice_draft(
         "customer_address": draft.get("customer_address"),
         "posting_date": expected_posting_date, "update_stock": 1,
         "custom_processor_lot_settlement": lot.name,
+        "custom_retained_material_invoice_mode": TALLY,
         "custom_invoice_number_reservation": reservation.name,
         "custom_tally_reservation_confirmation": confirmation.name,
     })
@@ -214,6 +216,7 @@ def create_sales_invoice_draft(
     event.update({
         "sales_invoice": invoice.name, "processor_lot": lot.name,
         "scope_key": reservation.get("scope_key"), "reservation": reservation.name,
+        "coordination_mode": TALLY,
         "tally_confirmation": confirmation.name, "naming_rule": resolved.get("name"),
         "naming_rule_counter_before": counter_before,
         "naming_rule_counter_after": counter_after, "reason": reason,
@@ -257,8 +260,12 @@ def create_sales_invoice_draft(
 
 def prevent_uncontrolled_submission(doc, method=None):
     """Require the exact controlled service and action for a retained-material sale."""
-    if (doc.get("custom_invoice_number_reservation")
-            or doc.get("custom_tally_reservation_confirmation")):
+    if (doc.get("custom_processor_lot_settlement")
+            or any(item.get("custom_processor_lot_scope_key") for item in doc.get("items") or [])
+            or doc.get("custom_retained_material_invoice_mode")
+            or doc.get("custom_invoice_number_reservation")
+            or doc.get("custom_tally_reservation_confirmation")
+            or _has_controlled_history(doc)):
         import frappe
         from frappe.utils import cint
 
@@ -272,8 +279,12 @@ def prevent_uncontrolled_submission(doc, method=None):
 
 def prevent_controlled_draft_deletion(doc, method=None):
     """Preserve a controlled draft and its immutable creation evidence."""
-    if (doc.get("custom_invoice_number_reservation")
-            or doc.get("custom_tally_reservation_confirmation")):
+    if (doc.get("custom_processor_lot_settlement")
+            or any(item.get("custom_processor_lot_scope_key") for item in doc.get("items") or [])
+            or doc.get("custom_retained_material_invoice_mode")
+            or doc.get("custom_invoice_number_reservation")
+            or doc.get("custom_tally_reservation_confirmation")
+            or _has_controlled_history(doc)):
         import frappe
         frappe.throw("Controlled retained-material Sales Invoice cannot be deleted")
 
@@ -281,13 +292,18 @@ def prevent_controlled_draft_deletion(doc, method=None):
 def protect_controlled_draft_integrity(doc):
     """After creation evidence exists, reject edits to controlled facts and lineage."""
     import frappe
-    reservation_name = doc.get("custom_invoice_number_reservation")
-    if not reservation_name:
+    controlled = (doc.get("custom_processor_lot_settlement")
+                  or any(item.get("custom_processor_lot_scope_key") for item in doc.get("items") or [])
+                  or doc.get("custom_retained_material_invoice_mode")
+                  or doc.get("custom_invoice_number_reservation")
+                  or doc.get("custom_tally_reservation_confirmation")
+                  or _has_controlled_history(doc))
+    if not controlled:
         return
     events = frappe.get_all(
         "Processor Lot Sales Invoice Draft Creation Event",
         filters={"sales_invoice": doc.name},
-        fields=["name", "processor_lot", "scope_key", "reservation",
+        fields=["name", "processor_lot", "scope_key", "coordination_mode", "reservation",
                 "tally_confirmation", "material_disposition",
                 "commercial_classification", "policy_reconciliation_event",
                 "treatment_decision_event", "disposition_revision",
@@ -308,10 +324,14 @@ def protect_controlled_draft_integrity(doc):
     )
     if ((doc.docstatus != 0
             and not (doc.docstatus == 1 and controlled_submission))
-            or reservation_name != event.get("reservation")
-            or doc.get("custom_tally_reservation_confirmation") != event.get("tally_confirmation")
-            or doc.get("custom_processor_lot_settlement") != event.get("processor_lot")):
+            or doc.get("custom_processor_lot_settlement") != event.get("processor_lot")
+            or not doc.get("update_stock") or doc.get("is_return")
+            or doc.get("is_debit_note")):
         frappe.throw("Controlled Sales Invoice header lineage is immutable")
+    try:
+        invoice_mode(doc, event)
+    except ValueError as exc:
+        frappe.throw(str(exc))
     items = doc.get("items") or []
     if len(items) != 1:
         frappe.throw("Controlled Sales Invoice must retain exactly one item")
@@ -338,6 +358,21 @@ def protect_controlled_draft_integrity(doc):
     ):
         if Decimal(str(actual)) != Decimal(str(expected)):
             frappe.throw("Controlled Sales Invoice commercial values are immutable")
+
+
+def _has_controlled_history(doc):
+    """Inspect the current document's prior state, never a name-only audit hit."""
+    if not hasattr(doc, "get_doc_before_save"):
+        return False
+    previous = doc.get_doc_before_save()
+    return bool(previous and (
+        previous.get("custom_processor_lot_settlement")
+        or previous.get("custom_retained_material_invoice_mode")
+        or previous.get("custom_invoice_number_reservation")
+        or previous.get("custom_tally_reservation_confirmation")
+        or any(item.get("custom_processor_lot_scope_key")
+               for item in previous.get("items") or [])
+    ))
 
 
 def _validate_resolved_invoice(invoice, item, expected_name, expected_template,

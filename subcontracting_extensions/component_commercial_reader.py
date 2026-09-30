@@ -435,7 +435,8 @@ def _sales_invoice_submission_readiness_context(api, lot, po, sco, report):
         ).lower() in ("1", "true"),
         "sales_invoice": invoice.as_dict(), "sales_invoice_items": items,
         "draft_creation_event": event.as_dict(),
-        "coordination_mode": settings.get("sales_invoice_number_coordination_mode"),
+        "coordination_mode": (event.get("coordination_mode")
+                              or "ERPNEXT_FORECAST_WITH_TALLY_COORDINATION"),
         "statutory_evidence": statutory, "stock_projection": stock,
         "statutory_evidence_confirmation_count": len(statutory_confirmations),
         "statutory_evidence_confirmation": statutory_confirmation,
@@ -517,7 +518,7 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
     draft_creation_events = api.get_all(
         "Processor Lot Sales Invoice Draft Creation Event",
         filters={"scope_key": scope_key},
-        fields=["name", "sales_invoice", "reservation", "tally_confirmation",
+        fields=["name", "sales_invoice", "coordination_mode", "reservation", "tally_confirmation",
                 "created_by", "created_at", "draft_only", "net_total",
                 "total_taxes_and_charges", "grand_total"],
         limit_page_length=2,
@@ -534,11 +535,21 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
     except (AttributeError, KeyError, TypeError):
         settings = {}
     mode = settings.get("sales_invoice_number_coordination_mode") or "DISABLED"
+    stock_evidence = None
+    if mode == "ERPNEXT_PRIMARY" and item_code and sco.get("supplier_warehouse"):
+        bins = api.get_all(
+            "Bin", filters={"item_code": item_code,
+                            "warehouse": sco.get("supplier_warehouse")},
+            fields=["actual_qty", "valuation_rate", "stock_value"],
+            limit_page_length=2,
+        )
+        if len(bins) == 1:
+            stock_evidence = bins[0]
     pattern = settings.get("outward_sales_invoice_series")
     forecast = None
     rule_snapshot = None
     stale = []
-    if mode == COORDINATION_TALLY:
+    if mode in (COORDINATION_TALLY, "ERPNEXT_PRIMARY"):
         try:
             rules = []
             for reference in api.get_all(
@@ -556,10 +567,10 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
             resolved_pattern = (
                 resolved.get("prefix") + "#" * int(resolved.get("prefix_digits") or 0)
             )
-            if pattern != resolved_pattern:
+            if mode == COORDINATION_TALLY and pattern != resolved_pattern:
                 raise ValueError("CONFIGURED_SERIES_DIFFERS_FROM_DOCUMENT_NAMING_RULE")
             forecast = {
-                "configured_series": pattern,
+                "configured_series": pattern if mode == COORDINATION_TALLY else resolved_pattern,
                 "forecast_number": forecast_from_naming_rule(resolved),
                 "forecast_source": "DOCUMENT_NAMING_RULE",
                 "forecast_status": "FORECAST_ONLY_NOT_RESERVED",
@@ -585,10 +596,13 @@ def _sales_invoice_draft_readiness_context(api, lot, po, sco, report):
         "sales_invoice_draft_creation_events": draft_creation_events,
         "sales_invoice_submission_events": submission_events,
         "stale_state_issues": stale,
-        "coordination_mode": mode,
+        "coordination_mode": (draft_creation_events[0].get("coordination_mode")
+                              or COORDINATION_TALLY) if len(draft_creation_events) == 1 else mode,
+        "new_draft_creation_mode": mode,
         "external_system_name": settings.get("external_invoice_system_name") or "Tally",
         "invoice_number_forecast": forecast,
         "naming_rule_snapshot": rule_snapshot,
+        "stock_evidence": stock_evidence,
     }
 
 

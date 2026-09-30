@@ -13,6 +13,7 @@ CONTRACT_VERSION = "J19B2G"
 TREATMENT = "SALES_INVOICE"
 COORDINATION_DISABLED = "DISABLED"
 COORDINATION_TALLY = "ERPNEXT_FORECAST_WITH_TALLY_COORDINATION"
+COORDINATION_ERPNEXT = "ERPNEXT_PRIMARY"
 
 
 def attach_sales_invoice_draft_readiness(report, context):
@@ -161,10 +162,12 @@ def _assess(row, context):
             != reservations[0].get("reserved_invoice_number")
             or confirmations[0].get("confirmation_status") != "CONFIRMED"):
         _issue(issues, "TALLY_RESERVATION_CONFIRMATION_MISMATCH")
-    if mode == COORDINATION_TALLY and not forecast:
+    if mode == COORDINATION_TALLY and not forecast and not controlled_draft_created:
         _issue(issues, "TALLY_INVOICE_NUMBER_FORECAST_NOT_READY")
-    elif mode not in (COORDINATION_DISABLED, COORDINATION_TALLY):
+    elif mode not in (COORDINATION_DISABLED, COORDINATION_TALLY, COORDINATION_ERPNEXT):
         _issue(issues, "INVOICE_NUMBER_COORDINATION_MODE_INVALID")
+    if mode == COORDINATION_ERPNEXT and (reservations or confirmations):
+        _issue(issues, "ERPNext-primary scope contains Tally coordination evidence")
 
     facts = {
         "company": context.get("company"),
@@ -218,6 +221,13 @@ def _assess(row, context):
         "invoice_number_coordination_mode": mode,
         "external_invoice_system": context.get("external_system_name") if mode == COORDINATION_TALLY else None,
         "invoice_number_forecast": forecast,
+        "naming_rule_snapshot": context.get("naming_rule_snapshot"),
+        "stock_evidence": context.get("stock_evidence"),
+        "erpnext_primary_draft_available": bool(
+            not issues and mode == COORDINATION_ERPNEXT
+            and context.get("new_draft_creation_mode") == COORDINATION_ERPNEXT
+            and not creation_events and context.get("naming_rule_snapshot")
+        ),
         "invoice_number_reservation": reservations[0] if len(reservations) == 1 else None,
         "tally_reservation_confirmation": (
             confirmations[0] if len(confirmations) == 1 else None

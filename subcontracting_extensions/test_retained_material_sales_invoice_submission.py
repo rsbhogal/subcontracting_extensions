@@ -26,7 +26,7 @@ class TestRetainedMaterialSalesInvoiceSubmission(unittest.TestCase):
         self.assertIn('invoice.set_posting_time = 1', source)
         self.assertIn('custom_allow_blank_ewaybill_transport_details = 1', source)
         self.assertIn('"NOT_APPLICABLE_NO_PHYSICAL_MOVEMENT"', source)
-        self.assertIn('"statutory_lead_system": "Tally"', source)
+        self.assertIn('"statutory_lead_system": "Tally" if mode == TALLY else "ERPNext"', source)
         self.assertIn('"lot_closure_authorized": False', source)
 
     def test_gl_accounts_are_resolved_from_live_documents(self):

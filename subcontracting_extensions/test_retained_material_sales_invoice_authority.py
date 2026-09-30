@@ -72,6 +72,78 @@ class TestSalesInvoiceAuthority(unittest.TestCase):
 
 
 class TestSalesInvoiceSubmissionHook(unittest.TestCase):
+    def test_history_guard_uses_current_document_prior_state(self):
+        from subcontracting_extensions.retained_material_sales_invoice_draft_creation import (
+            _has_controlled_history,
+        )
+        ordinary = SimpleNamespace(name="REUSED-NAME", get_doc_before_save=lambda: {
+            "custom_processor_lot_settlement": None,
+            "custom_retained_material_invoice_mode": None,
+            "custom_invoice_number_reservation": None,
+            "custom_tally_reservation_confirmation": None, "items": [],
+        })
+        self.assertFalse(_has_controlled_history(ordinary))
+        controlled = SimpleNamespace(name="SI-1", get_doc_before_save=lambda: {
+            "custom_processor_lot_settlement": "LOT", "items": [],
+        })
+        self.assertTrue(_has_controlled_history(controlled))
+
+    def test_erpnext_primary_draft_cannot_be_deleted_or_submitted_directly(self):
+        import frappe
+        from subcontracting_extensions.retained_material_sales_invoice_draft_creation import (
+            prevent_controlled_draft_deletion, prevent_uncontrolled_submission,
+        )
+        fields = {"custom_retained_material_invoice_mode": "ERPNEXT_PRIMARY",
+                  "custom_processor_lot_settlement": "LOT", "items": []}
+        doc = SimpleNamespace(get=fields.get, flags={})
+        with patch.object(frappe, "throw", side_effect=ValueError):
+            with self.assertRaises(ValueError):
+                prevent_controlled_draft_deletion(doc)
+            with self.assertRaises(ValueError):
+                prevent_uncontrolled_submission(doc)
+
+    def test_erpnext_primary_integrity_reads_pinned_creation_mode(self):
+        import frappe
+        from subcontracting_extensions.retained_material_sales_invoice_draft_creation import (
+            protect_controlled_draft_integrity,
+        )
+        item = {
+            "custom_processor_lot_scope_key": "SCOPE",
+            "custom_material_disposition": "DISP",
+            "custom_commercial_classification": "CLASS",
+            "custom_policy_reconciliation_event": "POLICY",
+            "custom_treatment_decision_event": "DECISION",
+            "custom_disposition_revision": 1,
+            "custom_classification_revision": 1,
+            "custom_treatment_revision": 1,
+            "warehouse": "SUPPLIER-WH", "qty": 2, "rate": 100,
+        }
+        fields = {
+            "custom_processor_lot_settlement": "LOT",
+            "custom_retained_material_invoice_mode": "ERPNEXT_PRIMARY",
+            "items": [item], "update_stock": 1,
+            "net_total": 200, "total_taxes_and_charges": 36,
+            "grand_total": 236,
+        }
+        doc = SimpleNamespace(name="SI-1", docstatus=0, flags={}, get=fields.get)
+        event = {
+            "name": "EVENT", "processor_lot": "LOT", "scope_key": "SCOPE",
+            "coordination_mode": "ERPNEXT_PRIMARY", "reservation": None,
+            "tally_confirmation": None, "material_disposition": "DISP",
+            "commercial_classification": "CLASS",
+            "policy_reconciliation_event": "POLICY",
+            "treatment_decision_event": "DECISION",
+            "disposition_revision": 1, "classification_revision": 1,
+            "treatment_revision": 1, "supplier_warehouse": "SUPPLIER-WH",
+            "recovery_quantity": 2, "material_content_rate": 100,
+            "net_total": 200, "total_taxes_and_charges": 36,
+            "grand_total": 236,
+        }
+        with patch.object(frappe, "get_all", return_value=[event]) as get_all:
+            protect_controlled_draft_integrity(doc)
+        self.assertIn("coordination_mode", get_all.call_args.kwargs["fields"])
+
+
     def test_ordinary_invoice_is_unaffected(self):
         from subcontracting_extensions.retained_material_sales_invoice_draft_creation import (
             prevent_uncontrolled_submission,

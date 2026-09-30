@@ -8,6 +8,7 @@ from subcontracting_extensions.retained_material_policy_reconciliation import (
 )
 from subcontracting_extensions.retained_material_invoice_release import require_current_release
 from subcontracting_extensions.settlement_action_authority import require_settlement_action
+from subcontracting_extensions.retained_material_invoice_mode import TALLY, invoice_mode
 
 
 CONTRACT_VERSION = "J19B2L"
@@ -48,13 +49,6 @@ def confirm_no_physical_movement(
                    filters={"sales_invoice": invoice.name}, fields=["name"],
                    limit_page_length=1):
         raise ValueError("Statutory evidence is already confirmed")
-
-    settings = api.get_single("Subcontracting Settlement Settings")
-    if settings.get("sales_invoice_number_coordination_mode") != (
-            "ERPNEXT_FORECAST_WITH_TALLY_COORDINATION"):
-        raise ValueError("Transitional Tally coordination is not enabled")
-    if (settings.get("external_invoice_system_name") or "Tally") != "Tally":
-        raise ValueError("External statutory lead system changed")
 
     lot = api.get_doc("Processor Lot", invoice.get("custom_processor_lot_settlement"))
     lot.check_permission("read")
@@ -97,6 +91,7 @@ def confirm_no_physical_movement(
 
     creation = api.get_doc("Processor Lot Sales Invoice Draft Creation Event", event)
     _lock(api, "Processor Lot Sales Invoice Draft Creation Event", creation.name)
+    mode = invoice_mode(invoice, creation)
     if (creation.get("reservation") != expected_reservation
             or creation.get("tally_confirmation") != expected_tally_confirmation
             or creation.get("scope_key") != expected_scope_key):
@@ -114,7 +109,8 @@ def confirm_no_physical_movement(
         "scope_key": expected_scope_key, "draft_creation_event": creation.name,
         "reservation": expected_reservation,
         "tally_confirmation": expected_tally_confirmation,
-        "external_statutory_system": "Tally", "evidence_outcome": OUTCOME,
+        "external_statutory_system": "Tally" if mode == TALLY else "ERPNext",
+        "evidence_outcome": OUTCOME,
         "confirmation_attested": 1, "reason": reason,
         "confirmed_by": api.session.user, "confirmed_at": now_datetime(),
         "invoice_modified_at_confirmation": invoice.modified,
@@ -137,7 +133,7 @@ def confirm_no_physical_movement(
     evidence.insert(ignore_permissions=True)
     return {
         "contract_version": CONTRACT_VERSION,
-        "confirmation_code": "TALLY_STATUTORY_EVIDENCE_CONFIRMED_NO_PHYSICAL_MOVEMENT",
+        "confirmation_code": "STATUTORY_EVIDENCE_CONFIRMED_NO_PHYSICAL_MOVEMENT",
         "statutory_evidence_confirmation": evidence.name,
         "sales_invoice": invoice.name, "evidence_outcome": OUTCOME,
         "submission_authorized": False, "stock_posting_authorized": False,

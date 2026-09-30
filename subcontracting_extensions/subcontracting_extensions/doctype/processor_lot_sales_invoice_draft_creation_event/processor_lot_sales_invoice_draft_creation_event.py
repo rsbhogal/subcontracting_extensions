@@ -17,6 +17,11 @@ class ProcessorLotSalesInvoiceDraftCreationEvent(Document):
                 self.stock_posting_authorized, self.accounting_posting_authorized,
                 self.tax_posting_authorized, self.lot_closure_authorized)):
             frappe.throw(_("Draft creation cannot authorize submission or posting."))
+        from subcontracting_extensions.retained_material_invoice_mode import event_mode
+        try:
+            event_mode(self)
+        except ValueError as exc:
+            frappe.throw(str(exc))
 
     def before_rename(self, olddn, newdn, merge=False):
         frappe.throw(_("Draft-creation events cannot be renamed."))

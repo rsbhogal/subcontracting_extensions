@@ -89,11 +89,11 @@
   },
   {
    "default": "DISABLED",
-   "description": "Temporary parallel-working control. Forecasting never reserves or allocates an invoice number.",
+   "description": "DISABLED pauses new controlled retained-material invoices. ERPNEXT_FORECAST_WITH_TALLY_COORDINATION reserves the ERPNext forecast in Tally before Draft creation; Tally leads statutory reporting. ERPNEXT_PRIMARY allocates the number on ERPNext Draft insertion and uses ERPNext for statutory reporting. Existing Drafts retain their recorded mode.",
    "fieldname": "sales_invoice_number_coordination_mode",
    "fieldtype": "Select",
    "label": "Sales Invoice Number Coordination Mode",
-   "options": "DISABLED\nERPNEXT_FORECAST_WITH_TALLY_COORDINATION",
+   "options": "DISABLED\nERPNEXT_FORECAST_WITH_TALLY_COORDINATION\nERPNEXT_PRIMARY",
    "reqd": 1
   },
   {

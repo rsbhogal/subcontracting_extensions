@@ -1,12 +1,13 @@
 {
  "actions": [], "allow_rename": 0, "autoname": "PLSIDC-.#####", "doctype": "DocType", "engine": "InnoDB",
- "field_order": ["sales_invoice","processor_lot","scope_key","reservation","tally_confirmation","naming_rule","naming_rule_counter_before","naming_rule_counter_after","reason","created_by","created_at","draft_only","material_disposition","commercial_classification","policy_reconciliation_event","treatment_decision_event","disposition_revision","classification_revision","treatment_revision","recovery_quantity","material_content_rate","supplier_warehouse","supplier_warehouse_qty_before","supplier_warehouse_valuation_rate","supplier_warehouse_stock_value_before","taxes_and_charges","item_tax_template","tax_rows_snapshot","net_total","total_taxes_and_charges","grand_total","submission_authorized","stock_posting_authorized","accounting_posting_authorized","tax_posting_authorized","lot_closure_authorized"],
+ "field_order": ["sales_invoice","processor_lot","scope_key","coordination_mode","reservation","tally_confirmation","naming_rule","naming_rule_counter_before","naming_rule_counter_after","reason","created_by","created_at","draft_only","material_disposition","commercial_classification","policy_reconciliation_event","treatment_decision_event","disposition_revision","classification_revision","treatment_revision","recovery_quantity","material_content_rate","supplier_warehouse","supplier_warehouse_qty_before","supplier_warehouse_valuation_rate","supplier_warehouse_stock_value_before","taxes_and_charges","item_tax_template","tax_rows_snapshot","net_total","total_taxes_and_charges","grand_total","submission_authorized","stock_posting_authorized","accounting_posting_authorized","tax_posting_authorized","lot_closure_authorized"],
  "fields": [
   {"fieldname":"sales_invoice","fieldtype":"Link","label":"Draft Sales Invoice","options":"Sales Invoice","reqd":1,"read_only":1,"unique":1,"in_list_view":1},
   {"fieldname":"processor_lot","fieldtype":"Link","label":"Processor Lot","options":"Processor Lot","reqd":1,"read_only":1},
   {"fieldname":"scope_key","fieldtype":"Data","label":"Scope Key","reqd":1,"read_only":1,"unique":1,"search_index":1},
-  {"fieldname":"reservation","fieldtype":"Link","label":"Invoice Number Reservation","options":"Processor Lot Sales Invoice Number Reservation","reqd":1,"read_only":1,"unique":1},
-  {"fieldname":"tally_confirmation","fieldtype":"Link","label":"Tally Confirmation","options":"Processor Lot Sales Invoice Number Confirmation","reqd":1,"read_only":1,"unique":1},
+  {"fieldname":"coordination_mode","fieldtype":"Data","label":"Coordination Mode at Draft Creation","read_only":1},
+  {"fieldname":"reservation","fieldtype":"Link","label":"Invoice Number Reservation","options":"Processor Lot Sales Invoice Number Reservation","read_only":1,"unique":1},
+  {"fieldname":"tally_confirmation","fieldtype":"Link","label":"Tally Confirmation","options":"Processor Lot Sales Invoice Number Confirmation","read_only":1,"unique":1},
   {"fieldname":"naming_rule","fieldtype":"Link","label":"Document Naming Rule","options":"Document Naming Rule","reqd":1,"read_only":1},
   {"fieldname":"naming_rule_counter_before","fieldtype":"Int","label":"Counter Before","reqd":1,"read_only":1},
   {"fieldname":"naming_rule_counter_after","fieldtype":"Int","label":"Counter After","reqd":1,"read_only":1},

@@ -9,6 +9,9 @@ from subcontracting_extensions.retained_material_policy_reconciliation import (
 )
 from subcontracting_extensions.settlement_action_authority import require_settlement_action
 from subcontracting_extensions.retained_material_invoice_release import require_current_release
+from subcontracting_extensions.retained_material_invoice_mode import (
+    ERPNEXT_PRIMARY, TALLY, erpnext_einvoice_request, invoice_mode,
+)
 
 
 CONTRACT_VERSION = "J19B2M"
@@ -52,6 +55,14 @@ def submit_sales_invoice(
             != "NOT_APPLICABLE_NO_PHYSICAL_MOVEMENT"
             or not confirmation.get("confirmation_attested")):
         raise ValueError("No-physical-movement confirmation does not match the invoice")
+    creation = api.get_doc("Processor Lot Sales Invoice Draft Creation Event",
+                           confirmation.get("draft_creation_event"))
+    mode = invoice_mode(invoice, creation)
+    if (confirmation.get("external_statutory_system") !=
+            ("Tally" if mode == TALLY else "ERPNext")
+            or confirmation.get("reservation") != creation.get("reservation")
+            or confirmation.get("tally_confirmation") != creation.get("tally_confirmation")):
+        raise ValueError("Statutory confirmation mode or Draft lineage changed")
 
     lot = api.get_doc("Processor Lot", confirmation.get("processor_lot"))
     lot.check_permission("read")
@@ -73,11 +84,21 @@ def submit_sales_invoice(
                                  "voucher_no": invoice.name}):
         raise ValueError("Sales Invoice already has accounting posting")
 
-    settings = api.get_single("Subcontracting Settlement Settings")
-    if (settings.get("sales_invoice_number_coordination_mode")
-            != "ERPNEXT_FORECAST_WITH_TALLY_COORDINATION"
-            or (settings.get("external_invoice_system_name") or "Tally") != "Tally"):
-        raise ValueError("Tally statutory-lead configuration changed")
+    # The immutable Draft event owns this invoice's mode; changing Settings
+    # affects only new Drafts.
+    einvoice_requested = False
+    if mode == ERPNEXT_PRIMARY:
+        from india_compliance.gst_india.utils import is_api_enabled
+        from india_compliance.gst_india.utils.e_invoice import validate_e_invoice_applicability
+        gst = api.get_cached_doc("GST Settings")
+        einvoice_applicable = bool(gst.enable_e_invoice and
+            validate_e_invoice_applicability(invoice, gst_settings=gst, throw=False))
+        einvoice_requested = erpnext_einvoice_request(
+            einvoice_applicable,
+            is_api_enabled(gst) if einvoice_applicable else False,
+            bool(gst.auto_generate_e_invoice),
+            bool(gst.get("generate_e_waybill_with_e_invoice")),
+        )
 
     report = read_preview(lot.name)
     matches = []
@@ -97,6 +118,8 @@ def submit_sales_invoice(
     if ((readiness.get("statutory_evidence_confirmation") or {}).get("name")
             != confirmation.name):
         raise ValueError("Statutory-evidence confirmation changed")
+    if readiness.get("statutory_lead_system") != ("Tally" if mode == TALLY else "ERPNext"):
+        raise ValueError("Draft statutory lead changed")
     disposition = row.get("persisted_material_disposition") or {}
     classification = row.get("persisted_classification") or {}
     if (int(disposition.get("disposition_revision") or 0)
@@ -132,6 +155,8 @@ def submit_sales_invoice(
         "stock_value": stock.get("stock_value"),
     }
     invoice.custom_allow_blank_ewaybill_transport_details = 1
+    if mode == ERPNEXT_PRIMARY:
+        invoice.e_waybill_status = "Not Applicable"
     # Preserve the reviewed Draft posting date/time. ERPNext otherwise replaces
     # an older Draft date with today's date during submission validation, which
     # also makes the reviewed due date stale.
@@ -149,6 +174,17 @@ def submit_sales_invoice(
             api.flags.controlled_retained_material_submission_doc = previous_submission_doc
     if invoice.get("docstatus") != 1:
         raise ValueError("ERPNext did not submit the controlled Sales Invoice")
+    if mode == ERPNEXT_PRIMARY and (invoice.get("ewaybill")
+                                   or invoice.get("e_waybill_status") != "Not Applicable"):
+        raise ValueError("ERPNext-primary no-movement invoice acquired e-Waybill evidence")
+    # The India Compliance hook is suppressed above to avoid automatic
+    # e-Waybill generation for material that does not physically move.
+    # Request only the applicable e-Invoice after the database commits.
+    if einvoice_requested:
+        api.enqueue(
+            "india_compliance.gst_india.utils.e_invoice.generate_e_invoice",
+            enqueue_after_commit=True, queue="short", docname=invoice.name, throw=False,
+        )
 
     sle = api.get_all(
         "Stock Ledger Entry",
@@ -188,8 +224,9 @@ def submit_sales_invoice(
         "statutory_evidence_confirmation": confirmation.name,
         "reason": reason, "submission_confirmed": 1,
         "submitted_by": api.session.user, "submitted_at": now_datetime(),
-        "statutory_lead_system": "Tally",
-        "erpnext_statutory_generation_suppressed": 1,
+        "statutory_lead_system": "Tally" if mode == TALLY else "ERPNext",
+        "erpnext_statutory_generation_suppressed": int(mode == TALLY),
+        "erpnext_einvoice_requested": int(einvoice_requested),
         "blank_transport_override_applied": 1,
         "material_disposition": disposition.get("name"),
         "commercial_classification": classification.get("name"),
@@ -223,7 +260,8 @@ def submit_sales_invoice(
         "stock_ledger_entry_count": len(sle), "gl_entry_count": len(gl),
         "warehouse_qty_after": after.get("actual_qty"),
         "warehouse_stock_value_after": after.get("stock_value"),
-        "statutory_generation_suppressed": True,
+        "statutory_generation_suppressed": mode == TALLY,
+        "erpnext_einvoice_requested": einvoice_requested,
         "lot_closure_authorized": False,
     }
 

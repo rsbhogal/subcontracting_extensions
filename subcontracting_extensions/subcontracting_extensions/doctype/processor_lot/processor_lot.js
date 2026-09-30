@@ -687,7 +687,12 @@ function j19_sales_invoice_draft_readiness_html(row) {
         ? `<button type="button" class="btn btn-xs btn-primary" data-j19-release-invoice
             data-j19-scope="${j14_escape(row.commercial_scope_key)}">${j14_escape(__("Release Invoice Preparation to Accounts"))}</button>`
         : "";
-    const coordination_text = submission.sales_invoice
+    const erpnext_primary = readiness.invoice_number_coordination_mode === "ERPNEXT_PRIMARY";
+    const coordination_text = erpnext_primary
+        ? creation.sales_invoice
+            ? __("ERPNext assigned this number when the controlled Draft was inserted.")
+            : __("ERPNext will assign the number when the controlled Draft is inserted. No Tally reservation is required.")
+        : submission.sales_invoice
         ? __("Controlled Sales Invoice {0} is submitted. Tally number coordination is complete; Processor Lot closure remains deferred.", [submission.sales_invoice])
         : creation.sales_invoice
         ? __("Controlled Draft Sales Invoice {0} exists. Tally number reservation is confirmed; submission remains deferred to a later controlled phase.", [creation.sales_invoice])
@@ -714,12 +719,15 @@ function j19_sales_invoice_draft_readiness_html(row) {
             j14_escape(draft.warehouse || "—"),
         ]])}
         ${warning}
+        ${erpnext_primary ? `<div class="alert alert-info" style="margin-top:10px">${j14_escape(coordination_text)}</div>` : ""}
         ${release_html}
         ${issues ? `<div>${j14_badge(__("Readiness blockers"), "amber")}<ul>${issues}</ul></div>` : ""}
         <p class="text-muted">${j14_escape(__(submission.name
             ? "Controlled Sales Invoice is submitted and posted. Processor Lot closure remains unauthorised."
             : creation.sales_invoice
             ? "Controlled Draft Sales Invoice exists. Submission, stock, accounting, tax posting, and lot closure remain unauthorised."
+            : erpnext_primary
+            ? "No number is allocated until controlled Draft insertion. Posting and lot closure remain unauthorised."
             : "Read-only forecast: no invoice number is reserved and no Sales Invoice, stock, accounting, tax, or lot-closure action is authorised."))}</p>
     </div>`;
 }
@@ -766,9 +774,12 @@ function j19_sales_invoice_submission_readiness_html(row) {
         <div>${j14_badge(j19_decision_label(readiness.readiness_code),
             readiness.blocking_issues?.length ? "amber" : "green")}</div>
         <div class="alert ${submission.name ? "alert-success" : "alert-warning"}" style="margin-top:10px;font-weight:600">
-            ${j14_escape(__(submission.name ? "STATUTORY COORDINATION COMPLETED IN TALLY" : "CURRENT OPERATING CONTROL — TALLY IS THE STATUTORY LEAD"))}<br>
+            ${j14_escape(__(readiness.statutory_lead_system === "ERPNext" ? "ERPNEXT IS THE STATUTORY LEAD"
+                : submission.name ? "STATUTORY COORDINATION COMPLETED IN TALLY" : "CURRENT OPERATING CONTROL — TALLY IS THE STATUTORY LEAD"))}<br>
             <span style="font-weight:400">${j14_escape(__(
-                submission.name
+                readiness.statutory_lead_system === "ERPNext"
+                    ? "No physical movement is attested. E-Waybill generation is suppressed; an applicable ERPNext e-Invoice is requested after submission."
+                : submission.name
                     ? "ERPNext statutory generation was suppressed for this controlled submission."
                     : "Record the Tally statutory evidence on the ERPNext draft before any future controlled submission."))}</span>
         </div>
@@ -790,7 +801,7 @@ function j19_sales_invoice_submission_readiness_html(row) {
         ${confirmation_html}
         ${submission_html}
         <p class="text-muted">${j14_escape(__(submission.name
-            ? "Submission evidence is recorded. ERPNext statutory generation and Processor Lot closure remain unauthorised."
+            ? "Submission evidence is recorded. Processor Lot closure remains unauthorised."
             : "Read-only evidence: submission, statutory generation, stock, accounting, tax posting, and lot closure remain unauthorised."))}</p>
         ${submission.name ? `<div>${j14_badge(__("Submitted and posted"), "green")}
             ${j14_link("Processor Lot Sales Invoice Submission Event", submission.name)}
@@ -880,7 +891,7 @@ function j19_submitted_sales_invoice_summary_html(row) {
         <div class="alert alert-success" style="margin-top:10px">
             <strong>${j14_escape(__("Recovery completed in ERPNext"))}</strong><br>
             ${j14_escape(__("Supplier warehouse stock"))}: ${j14_qty(stock.quantity_before)} → ${j14_qty(stock.quantity_after)} ${j14_escape(draft.uom || row.stock_uom || "")}<br>
-            ${j14_escape(__("Tally statutory coordination"))}: ${j14_escape(__("Completed"))}<br>
+            ${j14_escape(__("Statutory lead"))}: ${j14_escape(readiness.statutory_lead_system || "—")}<br>
             ${j14_escape(__("Physical movement"))}: ${j14_escape(__("None"))}<br>
             ${j14_escape(__("Processor Lot"))}: ${j14_escape(__("Remains open"))}
         </div>
@@ -1073,7 +1084,9 @@ function j19_submit_controlled_sales_invoice(frm, row, button) {
     frappe.prompt([
         {fieldtype: "HTML", fieldname: "warning", options:
             `<div class="alert alert-danger"><strong>${j14_escape(__("CRITICAL — THIS SUBMITS AND POSTS THE SALES INVOICE"))}</strong><br>
-            ${j14_escape(__("ERPNext will reduce the supplier warehouse stock and post receivable, sales, GST, cost-of-goods-sold, and stock-value entries. Tally remains the statutory lead; ERPNext statutory generation stays suppressed. The Processor Lot will not close."))}</div>`},
+            ${j14_escape(__(readiness.statutory_lead_system === "ERPNext"
+                ? "ERPNext will reduce supplier warehouse stock and post receivable, sales, GST, cost-of-goods-sold and stock value. No e-Waybill will be generated for this no-movement sale; an applicable ERPNext e-Invoice is requested after submission. The Processor Lot stays open."
+                : "ERPNext will reduce the supplier warehouse stock and post receivable, sales, GST, cost-of-goods-sold, and stock-value entries. Tally remains the statutory lead; ERPNext statutory generation stays suppressed. The Processor Lot will not close."))}</div>`},
         {fieldtype: "Check", fieldname: "submission_confirmed",
             label: __("I confirm this exact controlled Sales Invoice must now be submitted"), reqd: 1},
         {fieldtype: "Small Text", fieldname: "reason", label: __("Submission Reason"), reqd: 1},
@@ -1112,7 +1125,8 @@ function j19_confirm_no_physical_movement(frm, row, button) {
     const draft = row.retained_material_sales_invoice_draft_readiness || {};
     frappe.prompt([
         {fieldtype: "HTML", fieldname: "warning", options:
-            `<div class="alert alert-warning"><strong>${j14_escape(__("Tally remains the statutory lead."))}</strong><br>
+            `<div class="alert alert-warning"><strong>${j14_escape(__(readiness.statutory_lead_system === "ERPNext"
+                ? "ERPNext is the statutory lead." : "Tally remains the statutory lead."))}</strong><br>
             ${j14_escape(__("Confirm only when this recovery sale removes material already lying at the processor and causes no physical movement."))}</div>`},
         {fieldtype: "Check", fieldname: "confirmation_attested",
             label: __("I attest that this invoice causes no physical movement"), reqd: 1},

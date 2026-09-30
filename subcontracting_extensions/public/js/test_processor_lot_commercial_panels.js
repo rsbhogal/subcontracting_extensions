@@ -271,7 +271,7 @@ function commercial() {
     html = context.build_j19_commercial_panel(submitted, false);
     assert(html.includes("Retained Material Recovery"));
     assert(html.includes("Recovery completed in ERPNext"));
-    assert(html.includes("Tally statutory coordination") && html.includes("Remains open"));
+    assert(html.includes("Statutory lead") && html.includes("Remains open"));
     assert(!html.includes("Retained-material treatment readiness"));
     assert(!html.includes("Sales Invoice submission readiness"));
     assert(!html.includes("PLSISE-1"));

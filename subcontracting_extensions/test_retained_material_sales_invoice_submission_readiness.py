@@ -175,6 +175,42 @@ class TestSubmissionReadiness(unittest.TestCase):
         _, readiness = self.assess(context)
         self.assertTrue(readiness["controlled_submission_available"])
 
+    def test_erpnext_primary_requires_pinned_mode_and_no_movement_evidence(self):
+        context = self.context()
+        context["coordination_mode"] = "ERPNEXT_PRIMARY"
+        context["draft_creation_event"].update(
+            coordination_mode="ERPNEXT_PRIMARY", reservation=None,
+            tally_confirmation=None,
+        )
+        context["sales_invoice"].update(
+            custom_retained_material_invoice_mode="ERPNEXT_PRIMARY",
+            custom_invoice_number_reservation=None,
+            custom_tally_reservation_confirmation=None,
+        )
+        context["statutory_evidence"].update(
+            ewaybill=None, vehicle_no=None, irn=None, einvoice_applicable=True,
+        )
+        context["sales_invoice_submission_enabled"] = True
+        _, readiness = self.assess(context)
+        self.assertEqual(readiness["statutory_lead_system"], "ERPNext")
+        self.assertFalse(readiness["controlled_submission_available"])
+        context["statutory_evidence_confirmation_count"] = 1
+        context["statutory_evidence_confirmation"] = {
+            "name": "PLSISEC-1", "sales_invoice": context["sales_invoice"]["name"],
+            "scope_key": "SCOPE", "draft_creation_event": "PLSIDC-1",
+            "external_statutory_system": "ERPNext",
+            "evidence_outcome": "NOT_APPLICABLE_NO_PHYSICAL_MOVEMENT",
+            "confirmation_attested": 1,
+            "statutory_evidence_snapshot": context["statutory_evidence"],
+        }
+        _, readiness = self.assess(context)
+        self.assertEqual(readiness["blocking_issues"], [])
+        self.assertTrue(readiness["controlled_submission_available"])
+        context["sales_invoice"]["custom_invoice_number_reservation"] = "R"
+        _, readiness = self.assess(context)
+        self.assertIn("CONTROLLED_SALES_INVOICE_MODE_LINEAGE_CHANGED",
+                      readiness["blocking_issues"])
+
     def test_changed_statutory_fields_make_confirmation_stale(self):
         context = self.context()
         snapshot = dict(context["statutory_evidence"])
