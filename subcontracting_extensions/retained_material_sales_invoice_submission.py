@@ -276,12 +276,18 @@ def _validate_postings(api, invoice, item, sle, gl, stock_value):
     _number(entry.get("stock_value_difference"), -Decimal(str(stock_value)),
             "Stock Ledger value")
     expected = {}
-    _add(expected, invoice.get("debit_to"), invoice.get("grand_total"), 0)
+    receivable = _posting_amount(invoice, "grand_total")
+    if invoice.get("base_rounding_adjustment") and invoice.get("base_rounded_total"):
+        receivable = invoice.get("base_rounded_total")
+    _add(expected, invoice.get("debit_to"), receivable, 0)
     for tax in invoice.get("taxes") or []:
-        _add(expected, tax.get("account_head"), 0, tax.get("tax_amount"))
-    _add(expected, item.get("income_account"), 0, invoice.get("net_total"))
+        _add(expected, tax.get("account_head"), 0, _posting_amount(tax, "tax_amount"))
+    _add(expected, item.get("income_account"), 0, _posting_amount(invoice, "net_total"))
     _add(expected, item.get("expense_account"), stock_value, 0)
     _add(expected, _warehouse_account(api, item.get("warehouse")), 0, stock_value)
+    if invoice.get("rounding_adjustment") and invoice.get("base_rounding_adjustment"):
+        _add(expected, _round_off_account(invoice), 0,
+             invoice.get("base_rounding_adjustment"))
     actual = {}
     for row in gl:
         account = row.get("account")
@@ -290,6 +296,26 @@ def _validate_postings(api, invoice, item, sle, gl, stock_value):
                            credit + Decimal(str(row.get("credit") or 0)))
     if actual != expected:
         raise ValueError("Submitted Sales Invoice GL entries do not match controlled projection")
+
+
+def _posting_amount(row, field):
+    """GL debit/credit are in company currency, including native rounding."""
+    value = row.get("base_" + field)
+    return value if value is not None else row.get(field)
+
+
+def _round_off_account(invoice):
+    from erpnext.accounts.general_ledger import get_round_off_account_and_cost_center
+
+    account, _, opening_account = get_round_off_account_and_cost_center(
+        invoice.get("company"), "Sales Invoice", invoice.get("name"),
+        invoice.get("use_company_roundoff_cost_center"),
+    )
+    if invoice.get("is_opening") == "Yes":
+        if not opening_account:
+            raise ValueError("Opening invoice round-off account is missing")
+        return opening_account
+    return account
 
 
 def _warehouse_account(api, warehouse_name):
@@ -309,10 +335,15 @@ def _add(rows, account, debit, credit):
     current_debit, current_credit = rows.get(
         account, (Decimal("0"), Decimal("0"))
     )
-    rows[account] = (
-        current_debit + Decimal(str(debit or 0)),
-        current_credit + Decimal(str(credit or 0)),
-    )
+    debit, credit = Decimal(str(debit or 0)), Decimal(str(credit or 0))
+    # ERPNext normalizes negative credits/debits before persisting GL entries.
+    if debit < 0:
+        credit -= debit
+        debit = Decimal("0")
+    if credit < 0:
+        debit -= credit
+        credit = Decimal("0")
+    rows[account] = (current_debit + debit, current_credit + credit)
 
 
 def _number(actual, expected, label):
